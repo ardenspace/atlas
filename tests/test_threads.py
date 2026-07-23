@@ -35,3 +35,18 @@ def test_thread_404s(client):
     assert client.get("/api/threads/999").status_code == 404
     assert client.patch("/api/threads/999", json={"title": "x"}).status_code == 404
     assert client.post("/api/projects/999/threads", json={"title": "x"}).status_code == 404
+
+
+def test_empty_patch_returns_thread_unchanged(client):
+    # 빈 패치는 UPDATE 없이 현재 스레드를 그대로 반환 (early-return 브랜치)
+    p = make_project(client)
+    t = make_thread(client, p["id"], title="원제목")
+    res = client.patch(f"/api/threads/{t['id']}", json={})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["title"] == "원제목" and body["archived"] == 0
+    assert body["id"] == t["id"]
+
+
+def test_delete_missing_thread_404(client):
+    assert client.delete("/api/threads/999").status_code == 404

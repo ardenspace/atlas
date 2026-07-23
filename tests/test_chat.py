@@ -111,3 +111,39 @@ def test_chat_rejects_whitespace_only_message(client, fake_gemma):
     p = make_project(client)
     t = make_thread(client, p["id"])
     assert client.post(f"/api/threads/{t['id']}/chat", json={"message": "   "}).status_code == 422
+
+
+def test_chat_partial_saved_on_client_abort(client, monkeypatch):
+    # 스트리밍 도중 클라이언트가 끊으면(GeneratorExit) finally가 받은 만큼을 저장해야 한다
+    import asyncio
+
+    from server import gemma, main
+
+    async def fake_stream(system, messages, **kw):
+        yield "부분"
+        await asyncio.Event().wait()  # set되지 않음 — 클라이언트가 끊을 때까지 영원히 블록
+
+    async def fake_limit(**kw):
+        return None  # 413 가드 비활성
+
+    monkeypatch.setattr(gemma, "stream_chat", fake_stream)
+    monkeypatch.setattr(gemma, "context_limit", fake_limit)
+
+    # 프로젝트/스레드는 TestClient(동기)로 먼저 만든다 — 아래 직접 호출과 같은 DB(ATLAS_DB)를 친다
+    p = make_project(client)
+    t = make_thread(client, p["id"])
+
+    async def inner():
+        # 라우트 함수 직접 호출 (FastAPI DI 우회 — chat은 평범한 (int, ChatIn) 시그니처)
+        resp = await main.chat(t["id"], main.ChatIn(message="질문"))
+        gen = resp.body_iterator
+        first = await asyncio.wait_for(anext(gen), timeout=5)
+        assert json.loads(first[len("data: "):]) == {"delta": "부분"}
+        # aclose가 정지 지점(다음 청크 대기)에 GeneratorExit를 주입 → event_stream의 finally 실행
+        await asyncio.wait_for(gen.aclose(), timeout=5)
+
+    asyncio.run(inner())
+
+    # user 질문 + 부분 저장된 assistant 응답이 모두 보존됐는지 확인
+    msgs = client.get(f"/api/threads/{t['id']}").json()["messages"]
+    assert [(m["role"], m["content"]) for m in msgs] == [("user", "질문"), ("assistant", "부분")]

@@ -110,6 +110,26 @@ async def test_count_tokens_estimates_when_unreachable():
     assert n == 20 and exact is False
 
 
+@pytest.mark.anyio
+async def test_is_alive_true_on_200():
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, json={"status": "ok"}))
+    assert await gemma.is_alive(transport=transport) is True
+
+
+@pytest.mark.anyio
+async def test_is_alive_false_on_non_200():
+    transport = httpx.MockTransport(lambda req: httpx.Response(503))
+    assert await gemma.is_alive(transport=transport) is False
+
+
+@pytest.mark.anyio
+async def test_is_alive_false_on_connect_error():
+    def boom(req):
+        raise httpx.ConnectError("refused", request=req)
+
+    assert await gemma.is_alive(transport=httpx.MockTransport(boom)) is False
+
+
 def test_build_system_prompt_orders_kinds():
     project = {"name": "P", "brief": "메모"}
     docs = [

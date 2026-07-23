@@ -1,3 +1,4 @@
+from server import db
 from tests.test_projects import make_project
 
 
@@ -38,3 +39,34 @@ def test_doc_404s(client):
     assert client.get("/api/docs/999").status_code == 404
     assert client.put("/api/docs/999", json={"content": "x"}).status_code == 404
     assert client.delete("/api/docs/999").status_code == 404
+
+
+PAST = "2020-01-01 00:00:00"
+
+
+def _set_updated_at(doc_id, ts=PAST):
+    with db.connect() as conn:
+        conn.execute("UPDATE docs SET updated_at = ? WHERE id = ?", (ts, doc_id))
+
+
+def test_put_advances_updated_at(client):
+    # 과거 시각으로 강제한 뒤 실제 변경 PUT → updated_at가 datetime('now')로 밀려야 한다
+    p = make_project(client)
+    d = make_doc(client, p["id"], content="원본")
+    _set_updated_at(d["id"])
+    body = client.put(f"/api/docs/{d['id']}", json={"content": "수정본"}).json()
+    assert body["content"] == "수정본"
+    assert body["updated_at"] != PAST
+    assert body["updated_at"] > PAST  # 문자열 비교로도 단조 증가
+
+
+def test_empty_put_leaves_doc_and_updated_at_untouched(client):
+    # 빈 패치는 UPDATE 자체를 건너뛴다 → updated_at가 밀리지 않아야 한다
+    p = make_project(client)
+    d = make_doc(client, p["id"], content="원본")
+    _set_updated_at(d["id"])
+    res = client.put(f"/api/docs/{d['id']}", json={})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["content"] == "원본"
+    assert body["updated_at"] == PAST  # UPDATE 스킵 브랜치의 증거

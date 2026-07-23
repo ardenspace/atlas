@@ -1,5 +1,6 @@
 import pytest
 
+from server import db
 from tests.test_projects import make_project
 from tests.test_threads import make_thread
 
@@ -32,6 +33,38 @@ def test_budget_reports_docs_and_totals(client, fake_tokens):
     # doc_ids로 좁히면 해당 문서만
     body = client.get(f"/api/threads/{t['id']}/budget", params={"doc_ids": str(d1["id"])}).json()
     assert [d["title"] for d in body["docs"]] == ["기획"]
+
+
+def test_budget_counts_history_tokens(client, fake_tokens):
+    # 스레드에 메시지가 있으면 history_tokens > 0, total = system + history (1문자=1토큰 fake)
+    p = make_project(client)
+    t = make_thread(client, p["id"])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', ?)", (t["id"], "가" * 10))
+        conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'assistant', ?)", (t["id"], "나" * 7))
+    body = client.get(f"/api/threads/{t['id']}/budget").json()
+    assert body["history_tokens"] == 17  # 10 + 7
+    assert body["total"] == body["system_tokens"] + body["history_tokens"]
+
+
+def test_budget_exact_false_when_count_inexact(client, monkeypatch):
+    # count_tokens가 추정치(exact=False)를 내면 응답 exact도 False로 전파돼야 한다
+    from server import gemma
+
+    async def fake_limit(**kw):
+        return 8192
+
+    async def fake_count(text, **kw):
+        return len(text), False
+
+    monkeypatch.setattr(gemma, "context_limit", fake_limit)
+    monkeypatch.setattr(gemma, "count_tokens", fake_count)
+
+    p = make_project(client)
+    t = make_thread(client, p["id"])
+    client.post(f"/api/projects/{p['id']}/docs", json={"kind": "note", "title": "노트", "content": "다"})
+    body = client.get(f"/api/threads/{t['id']}/budget").json()
+    assert body["exact"] is False
 
 
 def test_budget_404_on_missing_thread(client, fake_tokens):

@@ -47,3 +47,14 @@ def test_patch_404_and_delete(client):
     p = make_project(client)
     assert client.delete(f"/api/projects/{p['id']}").status_code == 204
     assert client.get(f"/api/projects/{p['id']}").status_code == 404
+
+
+def test_patch_rename_into_existing_slug_conflicts(client):
+    # 두 번째 프로젝트를 첫 번째와 같은 slug로 rename → UNIQUE 충돌 → 409
+    a = make_project(client, "첫 이름")
+    b = make_project(client, "둘째 이름")
+    res = client.patch(f"/api/projects/{b['id']}", json={"name": "첫  이름"})
+    assert res.status_code == 409
+    # 충돌 시 원본은 보존된다 (롤백)
+    assert client.get(f"/api/projects/{b['id']}").json()["project"]["slug"] == "둘째-이름"
+    assert client.get(f"/api/projects/{a['id']}").json()["project"]["slug"] == "첫-이름"
