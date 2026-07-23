@@ -60,6 +60,11 @@ class ThreadIn(BaseModel):
     title: Name
 
 
+class ThreadPatch(BaseModel):
+    title: Name | None = None
+    archived: bool | None = None
+
+
 class ChatIn(BaseModel):
     message: str
 
@@ -146,6 +151,45 @@ def create_thread(project_id: int, t: ThreadIn):
         get_project_or_404(conn, project_id)
         cur = conn.execute("INSERT INTO threads (project_id, title) VALUES (?, ?)", (project_id, t.title))
         return dict(conn.execute("SELECT * FROM threads WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def get_thread_or_404(conn, thread_id: int) -> dict:
+    row = conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "thread not found")
+    return dict(row)
+
+
+@app.get("/api/threads/{thread_id}")
+def get_thread(thread_id: int):
+    with db.connect() as conn:
+        thread = get_thread_or_404(conn, thread_id)
+        messages = conn.execute(
+            "SELECT id, role, content, created_at FROM messages WHERE thread_id = ? ORDER BY id",
+            (thread_id,),
+        ).fetchall()
+    return {"thread": thread, "messages": [dict(m) for m in messages]}
+
+
+@app.patch("/api/threads/{thread_id}")
+def update_thread(thread_id: int, patch: ThreadPatch):
+    fields = patch.model_dump(exclude_none=True)
+    with db.connect() as conn:
+        thread = get_thread_or_404(conn, thread_id)
+        if not fields:
+            return thread
+        if "archived" in fields:
+            fields["archived"] = int(fields["archived"])
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE threads SET {sets} WHERE id = ?", (*fields.values(), thread_id))
+        return dict(conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone())
+
+
+@app.delete("/api/threads/{thread_id}", status_code=204)
+def delete_thread(thread_id: int):
+    with db.connect() as conn:
+        get_thread_or_404(conn, thread_id)
+        conn.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
 
 
 def get_doc_or_404(conn, doc_id: int) -> dict:
