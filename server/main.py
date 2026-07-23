@@ -320,6 +320,52 @@ async def chat(thread_id: int, body: ChatIn):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+class SettleIn(BaseModel):
+    target_doc_id: int | None = None
+
+
+@app.post("/api/threads/{thread_id}/settle")
+async def settle(thread_id: int, body: SettleIn):
+    with db.connect() as conn:
+        thread = get_thread_or_404(conn, thread_id)
+        target = None
+        if body.target_doc_id is not None:
+            target = get_doc_or_404(conn, body.target_doc_id)
+            if target["project_id"] != thread["project_id"]:
+                raise HTTPException(422, "doc belongs to another project")
+        messages = [
+            dict(m)
+            for m in conn.execute(
+                "SELECT role, content FROM messages WHERE thread_id = ? ORDER BY id", (thread_id,)
+            ).fetchall()
+        ]
+    if not messages:
+        raise HTTPException(422, "thread has no messages to settle")
+
+    system, prompt_messages = gemma.build_settle_messages(messages, target)
+
+    limit = await gemma.context_limit()
+    if limit is not None:
+        used, _ = await gemma.count_tokens(system + prompt_messages[0]["content"])
+        if used > limit - gemma.RESPONSE_RESERVE:
+            raise HTTPException(
+                413,
+                f"컨텍스트 초과 예상 ({used}/{limit} 토큰) — 스레드가 너무 길어 통째로 정착할 수 없습니다.",
+            )
+
+    async def event_stream():
+        try:
+            async for delta in gemma.stream_chat(system, prompt_messages):
+                yield _sse({"delta": delta})
+        except gemma.GemmaUnreachable:
+            yield _sse({"error": "llama-server(:8080)에 연결할 수 없어요. Gemma가 떠 있는지 확인하세요."})
+        except gemma.GemmaRequestFailed as e:
+            yield _sse({"error": f"Gemma 응답 실패 (HTTP {e.status_code})."})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.get("/api/threads/{thread_id}/budget")
 async def thread_budget(thread_id: int, doc_ids: str | None = None):
     ids = [int(x) for x in doc_ids.split(",") if x.strip()] if doc_ids is not None else None
