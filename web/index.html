@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>atlas</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <aside id="sidebar">
+    <header>
+      <h1>atlas</h1>
+      <span id="gemma-status" title="Gemma 상태">●</span>
+    </header>
+    <section>
+      <div class="section-head">
+        <h2>프로젝트</h2>
+        <button id="new-project">+</button>
+      </div>
+      <ul id="project-list"></ul>
+    </section>
+    <section>
+      <div class="section-head">
+        <h2>문서</h2>
+        <button id="new-doc" disabled>+</button>
+      </div>
+      <ul id="doc-list"></ul>
+    </section>
+  </aside>
+  <main id="main">
+    <div id="chat-log"><p class="placeholder">프로젝트를 선택하거나 만들어서 시작하세요.</p></div>
+    <form id="chat-form">
+      <textarea id="chat-input" rows="2" placeholder="세계관 얘기해보자… (Enter 전송, Shift+Enter 줄바꿈)" disabled></textarea>
+      <button type="submit" id="send" disabled>전송</button>
+    </form>
+  </main>
+  <dialog id="doc-view">
+    <h3 id="doc-view-title"></h3>
+    <pre id="doc-view-content"></pre>
+    <button onclick="this.closest('dialog').close()">닫기</button>
+  </dialog>
+  <script src="/static/app.js"></script>
+</body>
+</html>
