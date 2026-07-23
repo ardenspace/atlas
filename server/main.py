@@ -94,7 +94,7 @@ def create_project(p: ProjectIn):
                 (slugify(p.name), p.name, p.brief),
             )
         except sqlite3.IntegrityError:
-            raise HTTPException(409, "project with same slug exists")
+            raise HTTPException(409, "project with same slug exists") from None
         row = conn.execute("SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)).fetchone()
     return dict(row)
 
@@ -134,7 +134,7 @@ def update_project(project_id: int, patch: ProjectPatch):
         try:
             conn.execute(f"UPDATE projects SET {sets} WHERE id = ?", (*fields.values(), project_id))
         except sqlite3.IntegrityError:
-            raise HTTPException(409, "project with same slug exists")
+            raise HTTPException(409, "project with same slug exists") from None
         return dict(conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone())
 
 
@@ -271,10 +271,20 @@ def _sse(obj) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
 
+def _gemma_error_message(e: Exception) -> str:
+    """chat·settle 공용 사용자 대면 에러 문구 — 문구는 여기 한 곳에만 산다."""
+    if isinstance(e, gemma.GemmaRequestFailed):
+        return (
+            f"Gemma 응답 실패 (HTTP {e.status_code}). 컨텍스트 초과일 수 있어요 — "
+            "문서 선택이나 스레드 길이를 줄여보세요."
+        )
+    return "llama-server(:8080)에 연결할 수 없어요. Gemma가 떠 있는지 확인하세요."
+
+
 @app.post("/api/threads/{thread_id}/chat")
 async def chat(thread_id: int, body: ChatIn):
     with db.connect() as conn:
-        thread, project, docs, history = load_chat_context(conn, thread_id, body.doc_ids)
+        _thread, project, docs, history = load_chat_context(conn, thread_id, body.doc_ids)
     system = gemma.build_system_prompt(project, docs)
 
     limit = await gemma.context_limit()
@@ -301,10 +311,8 @@ async def chat(thread_id: int, body: ChatIn):
             async for delta in gemma.stream_chat(system, messages):
                 chunks.append(delta)
                 yield _sse({"delta": delta})
-        except gemma.GemmaUnreachable:
-            error = "llama-server(:8080)에 연결할 수 없어요. Gemma가 떠 있는지 확인하세요."
-        except gemma.GemmaRequestFailed as e:
-            error = f"Gemma 응답 실패 (HTTP {e.status_code}). 컨텍스트 초과일 수 있어요 — 문서 선택을 줄여보세요."
+        except (gemma.GemmaUnreachable, gemma.GemmaRequestFailed) as e:
+            error = _gemma_error_message(e)
         finally:
             # 클라이언트 중단(GeneratorExit) 포함: 받은 만큼은 저장해 대화 손실을 막는다
             if chunks:
@@ -357,10 +365,8 @@ async def settle(thread_id: int, body: SettleIn):
         try:
             async for delta in gemma.stream_chat(system, prompt_messages):
                 yield _sse({"delta": delta})
-        except gemma.GemmaUnreachable:
-            yield _sse({"error": "llama-server(:8080)에 연결할 수 없어요. Gemma가 떠 있는지 확인하세요."})
-        except gemma.GemmaRequestFailed as e:
-            yield _sse({"error": f"Gemma 응답 실패 (HTTP {e.status_code})."})
+        except (gemma.GemmaUnreachable, gemma.GemmaRequestFailed) as e:
+            yield _sse({"error": _gemma_error_message(e)})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -373,7 +379,7 @@ async def thread_budget(thread_id: int, doc_ids: str | None = None):
     except ValueError:
         raise HTTPException(400, "doc_ids must be comma-separated integers") from None
     with db.connect() as conn:
-        thread, project, docs, history = load_chat_context(conn, thread_id, ids)
+        _thread, project, docs, history = load_chat_context(conn, thread_id, ids)
     system = gemma.build_system_prompt(project, docs)
 
     exact = True

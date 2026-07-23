@@ -26,13 +26,13 @@ def fake_settle(monkeypatch):
     return captured
 
 
-def _thread_with_chat(client, fake_gemma_state=None):
+def _thread_with_chat(client):
     p = make_project(client)
     t = make_thread(client, p["id"])
     return p, t
 
 
-def test_settle_streams_draft_and_writes_nothing(client, fake_settle, monkeypatch):
+def test_settle_streams_draft_and_writes_nothing(client, fake_settle):
     p, t = _thread_with_chat(client)
     # 대화 기록을 직접 심는다 (chat 경유 없이)
     from server import db

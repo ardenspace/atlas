@@ -13,3 +13,9 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+# starlette TestClient가 httpx import 시점에 뱉는 그 경고 하나만 무시 — 다른 경고는 그대로 노출
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
+]
