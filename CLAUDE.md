@@ -4,10 +4,16 @@
 
 ## 아키텍처
 
-- `server/` — FastAPI 백엔드. SQLite(`data/atlas.db`)에 프로젝트/문서/대화 저장. Gemma 챗은 llama-server(:8080)의 OpenAI 호환 API로 프록시 (SSE 스트리밍).
-- `web/` — 바닐라 JS 정적 챗 UI. 빌드 단계 없음.
-- `.claude/skills/research/` — 조사 스킬. 웹 조사 → 마크다운 리포트 → `POST /api/projects/{id}/docs` (kind=research).
-- 문서 kind: `research`(조사 리포트) / `world`(세계관 문서) / `note`(기획 노트). 프로젝트의 모든 문서가 Gemma 시스템 프롬프트에 들어간다.
+- `server/` — FastAPI 백엔드. SQLite(`data/atlas.db`, `ATLAS_DB`로 오버라이드)에
+  프로젝트/문서/스레드/메시지 저장 (스키마 v2, `PRAGMA user_version`).
+  Gemma 챗은 llama-server(:8080, `ATLAS_LLAMA_BASE`)의 OpenAI 호환 API로 프록시 (SSE 스트리밍).
+- 문서 kind: `idea`(기획) / `research`(조사 리포트) / `world`(세계관 문서) / `note`(잡메모).
+  채팅 요청의 `doc_ids`로 이번 대화에 물릴 문서를 선택한다 (생략 시 전체).
+- 대화는 프로젝트당 다중 스레드. `POST /api/threads/{id}/settle`이 대화를 문서 초안으로
+  정리해 스트리밍하고(저장은 클라이언트 몫), `GET /api/threads/{id}/budget`이 컨텍스트
+  예산을 보고한다 (llama `/tokenize`·`/props` 기반, 서버 부재 시 추정치).
+- `web/` — 구 바닐라 UI (v2 API와 불일치, React+Vite로 대체 예정 — 계획 2).
+- 테스트: `uv run pytest` — llama-server를 절대 직접 치지 않는다 (모킹/MockTransport).
 
 ## 실행
 

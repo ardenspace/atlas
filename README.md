@@ -16,6 +16,14 @@ uv run uvicorn server.main:app --host 0.0.0.0 --port 8787
 
 전제: llama-server가 :8080에 Gemma를 띄워둔 상태여야 챗이 동작한다 (안 떠 있어도 프로젝트/문서 관리는 됨).
 
+## 테스트
+
+```bash
+uv run pytest
+```
+
+llama-server 없이 전부 돈다 (Gemma 연동은 모킹).
+
 ## 조사 돌리기
 
 Claude Code에서 이 리포 디렉토리를 열고:
