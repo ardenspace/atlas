@@ -50,6 +50,12 @@ class DocIn(BaseModel):
     content: str
 
 
+class DocPatch(BaseModel):
+    kind: Literal["idea", "research", "world", "note"] | None = None
+    title: Name | None = None
+    content: str | None = None
+
+
 class ThreadIn(BaseModel):
     title: Name
 
@@ -142,6 +148,13 @@ def create_thread(project_id: int, t: ThreadIn):
         return dict(conn.execute("SELECT * FROM threads WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
+def get_doc_or_404(conn, doc_id: int) -> dict:
+    row = conn.execute("SELECT * FROM docs WHERE id = ?", (doc_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "doc not found")
+    return dict(row)
+
+
 @app.post("/api/projects/{project_id}/docs", status_code=201)
 def add_doc(project_id: int, doc: DocIn):
     with db.connect() as conn:
@@ -150,18 +163,34 @@ def add_doc(project_id: int, doc: DocIn):
             "INSERT INTO docs (project_id, kind, title, content) VALUES (?, ?, ?, ?)",
             (project_id, doc.kind, doc.title, doc.content),
         )
-    return {"id": cur.lastrowid}
+        return dict(conn.execute("SELECT * FROM docs WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
-@app.get("/api/projects/{project_id}/docs/{doc_id}")
-def get_doc(project_id: int, doc_id: int):
+@app.get("/api/docs/{doc_id}")
+def get_doc(doc_id: int):
     with db.connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM docs WHERE id = ? AND project_id = ?", (doc_id, project_id)
-        ).fetchone()
-    if row is None:
-        raise HTTPException(404, "doc not found")
-    return dict(row)
+        return get_doc_or_404(conn, doc_id)
+
+
+@app.put("/api/docs/{doc_id}")
+def update_doc(doc_id: int, patch: DocPatch):
+    fields = patch.model_dump(exclude_none=True)
+    with db.connect() as conn:
+        get_doc_or_404(conn, doc_id)
+        if fields:
+            sets = ", ".join(f"{k} = ?" for k in fields)
+            conn.execute(
+                f"UPDATE docs SET {sets}, updated_at = datetime('now') WHERE id = ?",
+                (*fields.values(), doc_id),
+            )
+        return dict(conn.execute("SELECT * FROM docs WHERE id = ?", (doc_id,)).fetchone())
+
+
+@app.delete("/api/docs/{doc_id}", status_code=204)
+def delete_doc(doc_id: int):
+    with db.connect() as conn:
+        get_doc_or_404(conn, doc_id)
+        conn.execute("DELETE FROM docs WHERE id = ?", (doc_id,))
 
 
 @app.post("/api/projects/{project_id}/chat")
