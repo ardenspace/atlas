@@ -96,8 +96,13 @@ def test_settle_rejected_with_413_when_over_limit(client, monkeypatch):
     async def fake_count(text, **kw):
         return 5000, True  # 한도 초과 강제
 
+    async def fake_stream(system, messages, **kw):
+        raise AssertionError("413 guard bypassed — stream_chat must not be reached")
+        yield  # pragma: no cover — async generator 형태 유지용
+
     monkeypatch.setattr(gemma, "context_limit", fake_limit)
     monkeypatch.setattr(gemma, "count_tokens", fake_count)
+    monkeypatch.setattr(gemma, "stream_chat", fake_stream)
 
     p, t = _thread_with_chat(client)
     with db.connect() as conn:
