@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -66,7 +65,8 @@ class ThreadPatch(BaseModel):
 
 
 class ChatIn(BaseModel):
-    message: str
+    message: Annotated[str, StringConstraints(min_length=1)]
+    doc_ids: list[int] | None = None  # None=프로젝트 문서 전체, []=문서 없이
 
 
 def slugify(name: str) -> str:
@@ -237,41 +237,84 @@ def delete_doc(doc_id: int):
         conn.execute("DELETE FROM docs WHERE id = ?", (doc_id,))
 
 
-@app.post("/api/projects/{project_id}/chat")
-async def chat(project_id: int, body: ChatIn):
-    with db.connect() as conn:
-        project = get_project_or_404(conn, project_id)
-        docs = conn.execute(
-            "SELECT kind, title, content FROM docs WHERE project_id = ? ORDER BY id",
-            (project_id,),
+def load_chat_context(conn, thread_id: int, doc_ids: list[int] | None):
+    thread = get_thread_or_404(conn, thread_id)
+    project = get_project_or_404(conn, thread["project_id"])
+    if doc_ids is None:
+        rows = conn.execute(
+            "SELECT * FROM docs WHERE project_id = ? ORDER BY id", (project["id"],)
         ).fetchall()
-        history = conn.execute(
-            "SELECT role, content FROM messages WHERE project_id = ? ORDER BY id DESC LIMIT ?",
-            (project_id, HISTORY_LIMIT),
+    elif not doc_ids:
+        rows = []
+    else:
+        ph = ",".join("?" * len(doc_ids))
+        rows = conn.execute(
+            f"SELECT * FROM docs WHERE project_id = ? AND id IN ({ph}) ORDER BY id",
+            (project["id"], *doc_ids),
         ).fetchall()
-        conn.execute(
-            "INSERT INTO messages (project_id, role, content) VALUES (?, 'user', ?)",
-            (project_id, body.message),
+    history = [
+        dict(h)
+        for h in reversed(
+            conn.execute(
+                "SELECT role, content FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT ?",
+                (thread_id, HISTORY_LIMIT),
+            ).fetchall()
         )
+    ]
+    # 잘린 창이 assistant로 시작하면 버린다 — Gemma 템플릿은 첫 턴이 user일 것을 강제
+    while history and history[0]["role"] == "assistant":
+        history.pop(0)
+    return thread, project, [dict(r) for r in rows], history
 
-    system = gemma.build_system_prompt(project, [dict(d) for d in docs])
-    messages = [{"role": r["role"], "content": r["content"]} for r in reversed(history)]
-    messages.append({"role": "user", "content": body.message})
+
+def _sse(obj) -> str:
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/threads/{thread_id}/chat")
+async def chat(thread_id: int, body: ChatIn):
+    with db.connect() as conn:
+        thread, project, docs, history = load_chat_context(conn, thread_id, body.doc_ids)
+    system = gemma.build_system_prompt(project, docs)
+
+    limit = await gemma.context_limit()
+    if limit is not None:
+        history_text = "".join(m["content"] for m in history)
+        used, _ = await gemma.count_tokens(system + history_text + body.message)
+        if used > limit - gemma.RESPONSE_RESERVE:
+            raise HTTPException(
+                413,
+                f"컨텍스트 초과 예상 ({used}/{limit} 토큰). 문서 선택을 줄이거나 새 스레드에서 계속하세요.",
+            )
+
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', ?)",
+            (thread_id, body.message),
+        )
+    messages = [*history, {"role": "user", "content": body.message}]
 
     async def event_stream():
-        chunks = []
+        chunks: list[str] = []
+        error = None
         try:
             async for delta in gemma.stream_chat(system, messages):
                 chunks.append(delta)
-                yield f"data: {json.dumps({'delta': delta})}\n\n"
-        except httpx.HTTPError:
-            yield f"data: {json.dumps({'error': 'llama-server(:8080)에 연결할 수 없어요. Gemma가 떠 있는지 확인하세요.'})}\n\n"
-            return
-        with db.connect() as conn:
-            conn.execute(
-                "INSERT INTO messages (project_id, role, content) VALUES (?, 'assistant', ?)",
-                (project_id, "".join(chunks)),
-            )
+                yield _sse({"delta": delta})
+        except gemma.GemmaUnreachable:
+            error = "llama-server(:8080)에 연결할 수 없어요. Gemma가 떠 있는지 확인하세요."
+        except gemma.GemmaRequestFailed as e:
+            error = f"Gemma 응답 실패 (HTTP {e.status_code}). 컨텍스트 초과일 수 있어요 — 문서 선택을 줄여보세요."
+        finally:
+            # 클라이언트 중단(GeneratorExit) 포함: 받은 만큼은 저장해 대화 손실을 막는다
+            if chunks:
+                with db.connect() as conn:
+                    conn.execute(
+                        "INSERT INTO messages (thread_id, role, content) VALUES (?, 'assistant', ?)",
+                        (thread_id, "".join(chunks)),
+                    )
+        if error:
+            yield _sse({"error": error})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
