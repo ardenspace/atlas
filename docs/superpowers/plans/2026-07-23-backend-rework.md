@@ -38,7 +38,7 @@
 | DELETE | `/api/threads/{id}` | | 204 |
 | GET | `/api/threads/{id}/budget` | `?doc_ids=1,2` (생략=전체) | `{limit, reserve, total, system_tokens, history_tokens, docs:[{id,title,tokens}], exact}` |
 | POST | `/api/threads/{id}/chat` | `{message, doc_ids?}` | SSE `{delta}`/`{error}`/`[DONE]`; 413 컨텍스트 초과 |
-| POST | `/api/threads/{id}/settle` | `{target_doc_id?}` | SSE (문서 초안 스트림, DB 저장 없음) |
+| POST | `/api/threads/{id}/settle` | `{target_doc_id?}` | SSE (문서 초안 스트림, DB 저장 없음); 413 컨텍스트 초과 |
 
 SSE 이벤트 형식: `data: {"delta": "..."}\n\n`, 오류 시 `data: {"error": "..."}\n\n`, 종료 `data: [DONE]\n\n`.
 
@@ -813,9 +813,9 @@ git commit -m "feat: thread get/patch/delete"
   - `RESPONSE_RESERVE = 2048`, `KIND_LABEL: dict`, `KIND_ORDER: list`
   - `build_system_prompt(project: dict, docs: list[dict]) -> str` — kind 순서(idea→research→world→note)로 섹션 구성
   - `build_settle_messages(messages: list[dict], target_doc: dict | None) -> tuple[str, list[dict]]`
-  - `async stream_chat(system, messages, *, transport=None) -> AsyncIterator[str]`
+  - `async stream_chat(system, messages, *, transport=None) -> AsyncIterator[str]` — 연속 같은 role 메시지는 병합해 전송 (Gemma 챗 템플릿의 user/assistant 교대 강제 대응)
   - `async context_limit(*, transport=None) -> int | None` (llama `/props`의 n_ctx)
-  - `async count_tokens(text, *, transport=None) -> tuple[int, bool]` ((토큰수, 정확여부); 서버 없으면 `len//3` 추정에 False)
+  - `async count_tokens(text, *, transport=None) -> tuple[int, bool]` ((토큰수, 정확여부); 서버 없으면 한국어 기준 `len/1.5` 추정에 False)
   - `async is_alive(*, transport=None) -> bool`
 
 - [ ] **Step 1: 실패하는 테스트 작성**
@@ -823,6 +823,8 @@ git commit -m "feat: thread get/patch/delete"
 `tests/test_gemma.py`:
 
 ```python
+import json
+
 import httpx
 import pytest
 
@@ -840,6 +842,26 @@ async def test_stream_chat_yields_deltas():
     transport = httpx.MockTransport(lambda req: httpx.Response(200, content=SSE))
     out = [d async for d in gemma.stream_chat("sys", [], transport=transport)]
     assert out == ["안", "녕"]
+
+
+@pytest.mark.anyio
+async def test_stream_chat_merges_consecutive_same_role_messages():
+    # 스트림 실패로 히스토리에 user가 연속으로 남아도 Gemma 템플릿(role 교대 강제)이 안 깨져야 한다
+    captured = {}
+
+    def handler(req):
+        captured["payload"] = json.loads(req.content)
+        return httpx.Response(200, content=SSE)
+
+    msgs = [
+        {"role": "user", "content": "첫 질문"},
+        {"role": "user", "content": "재시도"},
+        {"role": "assistant", "content": "답"},
+    ]
+    [d async for d in gemma.stream_chat("sys", msgs, transport=httpx.MockTransport(handler))]
+    sent = captured["payload"]["messages"]
+    assert [m["role"] for m in sent] == ["system", "user", "assistant"]
+    assert "첫 질문" in sent[1]["content"] and "재시도" in sent[1]["content"]
 
 
 @pytest.mark.anyio
@@ -881,7 +903,7 @@ async def test_count_tokens_estimates_when_unreachable():
         raise httpx.ConnectError("refused", request=req)
 
     n, exact = await gemma.count_tokens("가" * 30, transport=httpx.MockTransport(boom))
-    assert n == 10 and exact is False
+    assert n == 20 and exact is False
 
 
 def test_build_system_prompt_orders_kinds():
@@ -997,10 +1019,24 @@ def _client(transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncCli
     return httpx.AsyncClient(timeout=httpx.Timeout(300, connect=5), transport=transport)
 
 
+def _merge_consecutive_roles(messages: list[dict]) -> list[dict]:
+    """Gemma 챗 템플릿은 user/assistant 교대를 강제한다 — 연속 같은 role은 하나로 병합."""
+    merged: list[dict] = []
+    for m in messages:
+        if merged and merged[-1]["role"] == m["role"]:
+            merged[-1]["content"] += "\n\n" + m["content"]
+        else:
+            merged.append({"role": m["role"], "content": m["content"]})
+    return merged
+
+
 async def stream_chat(
     system: str, messages: list[dict], *, transport: httpx.AsyncBaseTransport | None = None
 ) -> AsyncIterator[str]:
-    payload = {"messages": [{"role": "system", "content": system}, *messages], "stream": True}
+    payload = {
+        "messages": [{"role": "system", "content": system}, *_merge_consecutive_roles(messages)],
+        "stream": True,
+    }
     try:
         async with _client(transport) as client:
             async with client.stream(
@@ -1035,14 +1071,14 @@ async def context_limit(*, transport: httpx.AsyncBaseTransport | None = None) ->
 async def count_tokens(
     text: str, *, transport: httpx.AsyncBaseTransport | None = None
 ) -> tuple[int, bool]:
-    """(토큰 수, 정확 여부). 서버가 없으면 문자수//3 추정치에 False."""
+    """(토큰 수, 정확 여부). 서버가 없으면 추정치에 False (Gemma 토크나이저 한국어 기준 ~1.5자=1토큰)."""
     try:
         async with _client(transport) as client:
             resp = await client.post(f"{LLAMA_BASE}/tokenize", json={"content": text}, timeout=10)
             resp.raise_for_status()
             return len(resp.json()["tokens"]), True
     except (httpx.HTTPError, KeyError, TypeError):
-        return max(1, len(text) // 3), False
+        return max(1, int(len(text) / 1.5)), False
 
 
 async def is_alive(*, transport: httpx.AsyncBaseTransport | None = None) -> bool:
@@ -1059,7 +1095,7 @@ async def is_alive(*, transport: httpx.AsyncBaseTransport | None = None) -> bool
 - [ ] **Step 4: 통과 확인**
 
 Run: `uv run pytest tests/test_gemma.py -v`
-Expected: PASS (7 tests)
+Expected: PASS (8 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1079,7 +1115,7 @@ git commit -m "feat: gemma client v2 - typed errors, tokenize/props, settle prom
 **Interfaces:**
 - Consumes: Task 4 `get_thread_or_404`, Task 5 gemma 전부
 - Produces: `POST /api/threads/{id}/chat` `{message, doc_ids?}` → SSE. `load_chat_context(conn, thread_id, doc_ids) -> (thread, project, docs, history)` — Task 7·8이 재사용. `ChatIn(message, doc_ids)`.
-- 동작 계약: user 메시지는 스트림 시작 전 저장. 스트림 실패/중단 시 **받은 청크가 있으면 assistant 부분 저장**. 오류는 unreachable(연결 불가)과 request-failed(HTTP n — 컨텍스트 초과 가능)를 구분한 `{error}` 이벤트.
+- 동작 계약: user 메시지는 스트림 시작 전 저장. 스트림 실패/중단 시 **받은 청크가 있으면 assistant 부분 저장**. 오류는 unreachable(연결 불가)과 request-failed(HTTP n — 컨텍스트 초과 가능)를 구분한 `{error}` 이벤트. 실패로 히스토리에 user 메시지가 연속으로 남아도 `stream_chat`의 role 병합(Task 5)이 흡수하므로 스레드가 막히지 않는다. `HISTORY_LIMIT` 잘림으로 히스토리가 assistant로 시작하게 되면 앞쪽 assistant를 버린다 (Gemma 템플릿은 첫 턴이 user일 것도 강제).
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -1102,10 +1138,11 @@ def read_events(resp):
 def fake_gemma(monkeypatch):
     from server import gemma
 
-    state = {"system": None, "chunks": ["안녕", "하세요"], "raise_after": None}
+    state = {"system": None, "messages": None, "chunks": ["안녕", "하세요"], "raise_after": None}
 
     async def fake_stream(system, messages, **kw):
         state["system"] = system
+        state["messages"] = messages
         for c in state["chunks"]:
             yield c
         if state["raise_after"] == "request_failed":
@@ -1172,6 +1209,23 @@ def test_chat_partial_output_is_saved_on_failure(client, fake_gemma):
     assert [(m["role"], m["content"]) for m in msgs] == [("user", "하이"), ("assistant", "부분")]
 
 
+def test_chat_history_never_starts_with_assistant(client, fake_gemma, monkeypatch):
+    # HISTORY_LIMIT 잘림이 assistant 앞에서 끊기면 Gemma 템플릿(첫 턴 user 강제)이 깨진다
+    from server import db, main
+
+    monkeypatch.setattr(main, "HISTORY_LIMIT", 1)
+    p = make_project(client)
+    t = make_thread(client, p["id"])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', '질문')", (t["id"],))
+        conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'assistant', '답변')", (t["id"],))
+    with client.stream("POST", f"/api/threads/{t['id']}/chat", json={"message": "새 질문"}) as resp:
+        read_events(resp)
+    # 히스토리 창(마지막 1개 = assistant)은 버려지고 새 user 메시지만 전송된다
+    assert [m["role"] for m in fake_gemma["messages"]] == ["user"]
+    assert fake_gemma["messages"][0]["content"] == "새 질문"
+
+
 def test_chat_404_on_missing_thread(client, fake_gemma):
     assert client.post("/api/threads/999/chat", json={"message": "x"}).status_code == 404
 ```
@@ -1206,11 +1260,19 @@ def load_chat_context(conn, thread_id: int, doc_ids: list[int] | None):
             f"SELECT * FROM docs WHERE project_id = ? AND id IN ({ph}) ORDER BY id",
             (project["id"], *doc_ids),
         ).fetchall()
-    history = conn.execute(
-        "SELECT role, content FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT ?",
-        (thread_id, HISTORY_LIMIT),
-    ).fetchall()
-    return thread, project, [dict(r) for r in rows], [dict(h) for h in reversed(history)]
+    history = [
+        dict(h)
+        for h in reversed(
+            conn.execute(
+                "SELECT role, content FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT ?",
+                (thread_id, HISTORY_LIMIT),
+            ).fetchall()
+        )
+    ]
+    # 잘린 창이 assistant로 시작하면 버린다 — Gemma 템플릿은 첫 턴이 user일 것을 강제
+    while history and history[0]["role"] == "assistant":
+        history.pop(0)
+    return thread, project, [dict(r) for r in rows], history
 
 
 def _sse(obj) -> str:
@@ -1419,7 +1481,7 @@ git commit -m "feat: context budget endpoint"
 
 **Interfaces:**
 - Consumes: Task 5 `build_settle_messages`/`stream_chat`, Task 4 `get_thread_or_404`, Task 3 `get_doc_or_404`
-- Produces: `POST /api/threads/{id}/settle` `{target_doc_id?}` → SSE 초안 스트림. **DB에 아무것도 쓰지 않는다** — 저장은 클라이언트가 docs POST/PUT으로. 빈 스레드 422, 타 프로젝트 문서 422.
+- Produces: `POST /api/threads/{id}/settle` `{target_doc_id?}` → SSE 초안 스트림. **DB에 아무것도 쓰지 않는다** — 저장은 클라이언트가 docs POST/PUT으로. 빈 스레드 422, 타 프로젝트 문서 422, 컨텍스트 초과 예상 시 413 (chat과 동일 가드 — settle은 스레드 **전체** 메시지가 들어가므로 특히 필요).
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -1446,7 +1508,11 @@ def fake_settle(monkeypatch):
         captured["messages"] = messages
         yield "# 정착 문서\n\n본문"
 
+    async def fake_limit(**kw):
+        return None  # 가드 비활성 — 413 경로는 별도 테스트에서 검증 (실제 :8080 호출 방지)
+
     monkeypatch.setattr(gemma, "stream_chat", fake_stream)
+    monkeypatch.setattr(gemma, "context_limit", fake_limit)
     return captured
 
 
@@ -1509,6 +1575,26 @@ def test_settle_rejects_foreign_doc(client, fake_settle):
     with db.connect() as conn:
         conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', 'hi')", (t["id"],))
     assert client.post(f"/api/threads/{t['id']}/settle", json={"target_doc_id": d["id"]}).status_code == 422
+
+
+def test_settle_rejected_with_413_when_over_limit(client, monkeypatch):
+    from server import db, gemma
+
+    async def fake_limit(**kw):
+        return 1000
+
+    async def fake_count(text, **kw):
+        return 5000, True  # 한도 초과 강제
+
+    monkeypatch.setattr(gemma, "context_limit", fake_limit)
+    monkeypatch.setattr(gemma, "count_tokens", fake_count)
+
+    p, t = _thread_with_chat(client)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', 'hi')", (t["id"],))
+    res = client.post(f"/api/threads/{t['id']}/settle", json={})
+    assert res.status_code == 413
+    assert "컨텍스트" in res.json()["detail"]
 ```
 
 - [ ] **Step 2: 실패 확인**
@@ -1544,6 +1630,15 @@ async def settle(thread_id: int, body: SettleIn):
         raise HTTPException(422, "thread has no messages to settle")
 
     system, prompt_messages = gemma.build_settle_messages(messages, target)
+
+    limit = await gemma.context_limit()
+    if limit is not None:
+        used, _ = await gemma.count_tokens(system + prompt_messages[0]["content"])
+        if used > limit - gemma.RESPONSE_RESERVE:
+            raise HTTPException(
+                413,
+                f"컨텍스트 초과 예상 ({used}/{limit} 토큰) — 스레드가 너무 길어 통째로 정착할 수 없습니다.",
+            )
 
     async def event_stream():
         try:
