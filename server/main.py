@@ -320,6 +320,37 @@ async def chat(thread_id: int, body: ChatIn):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.get("/api/threads/{thread_id}/budget")
+async def thread_budget(thread_id: int, doc_ids: str | None = None):
+    ids = [int(x) for x in doc_ids.split(",") if x.strip()] if doc_ids is not None else None
+    with db.connect() as conn:
+        thread, project, docs, history = load_chat_context(conn, thread_id, ids)
+    system = gemma.build_system_prompt(project, docs)
+
+    exact = True
+    doc_tokens = []
+    for d in docs:
+        n, ok = await gemma.count_tokens(d["content"])
+        exact = exact and ok
+        doc_tokens.append({"id": d["id"], "title": d["title"], "tokens": n})
+    system_tokens, ok = await gemma.count_tokens(system)
+    exact = exact and ok
+    history_tokens = 0
+    if history:
+        history_tokens, ok = await gemma.count_tokens("".join(m["content"] for m in history))
+        exact = exact and ok
+
+    return {
+        "limit": await gemma.context_limit(),
+        "reserve": gemma.RESPONSE_RESERVE,
+        "total": system_tokens + history_tokens,
+        "system_tokens": system_tokens,
+        "history_tokens": history_tokens,
+        "docs": doc_tokens,
+        "exact": exact,
+    }
+
+
 @app.get("/")
 def index():
     return FileResponse(WEB_DIR / "index.html")
