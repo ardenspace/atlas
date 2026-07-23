@@ -3,6 +3,7 @@
 Run: uv run uvicorn server.main:app --host 0.0.0.0 --port 8787
 """
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -13,8 +14,14 @@ from pydantic import BaseModel
 
 from . import db, gemma
 
-app = FastAPI(title="atlas")
-db.init()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db.init()
+    yield
+
+
+app = FastAPI(title="atlas", lifespan=lifespan)
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
