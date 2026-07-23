@@ -104,3 +104,10 @@ def test_chat_history_never_starts_with_assistant(client, fake_gemma, monkeypatc
 
 def test_chat_404_on_missing_thread(client, fake_gemma):
     assert client.post("/api/threads/999/chat", json={"message": "x"}).status_code == 404
+
+
+def test_chat_rejects_whitespace_only_message(client, fake_gemma):
+    # 공백만 있는 메시지는 검증 단계(gemma 호출 전)에서 422로 거부
+    p = make_project(client)
+    t = make_thread(client, p["id"])
+    assert client.post(f"/api/threads/{t['id']}/chat", json={"message": "   "}).status_code == 422

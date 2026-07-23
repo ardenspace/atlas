@@ -110,7 +110,10 @@ async def stream_chat(
                     data = line[len("data: "):]
                     if data.strip() == "[DONE]":
                         break
-                    delta = json.loads(data)["choices"][0]["delta"]
+                    try:
+                        delta = json.loads(data)["choices"][0]["delta"]
+                    except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                        continue  # 깨진 SSE 라인은 건너뛰고 스트림은 유지
                     if content := delta.get("content"):
                         yield content
     except httpx.TransportError as e:
@@ -124,7 +127,7 @@ async def context_limit(*, transport: httpx.AsyncBaseTransport | None = None) ->
             resp = await client.get(f"{LLAMA_BASE}/props", timeout=3)
             resp.raise_for_status()
             return resp.json()["default_generation_settings"]["n_ctx"]
-    except (httpx.HTTPError, KeyError, TypeError):
+    except (httpx.HTTPError, KeyError, TypeError, ValueError):
         return None
 
 
@@ -137,7 +140,7 @@ async def count_tokens(
             resp = await client.post(f"{LLAMA_BASE}/tokenize", json={"content": text}, timeout=10)
             resp.raise_for_status()
             return len(resp.json()["tokens"]), True
-    except (httpx.HTTPError, KeyError, TypeError):
+    except (httpx.HTTPError, KeyError, TypeError, ValueError):
         return max(1, int(len(text) / 1.5)), False
 
 

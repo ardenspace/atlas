@@ -65,7 +65,7 @@ class ThreadPatch(BaseModel):
 
 
 class ChatIn(BaseModel):
-    message: Annotated[str, StringConstraints(min_length=1)]
+    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     doc_ids: list[int] | None = None  # None=프로젝트 문서 전체, []=문서 없이
 
 
@@ -368,7 +368,10 @@ async def settle(thread_id: int, body: SettleIn):
 
 @app.get("/api/threads/{thread_id}/budget")
 async def thread_budget(thread_id: int, doc_ids: str | None = None):
-    ids = [int(x) for x in doc_ids.split(",") if x.strip()] if doc_ids is not None else None
+    try:
+        ids = [int(x) for x in doc_ids.split(",") if x.strip()] if doc_ids is not None else None
+    except ValueError:
+        raise HTTPException(400, "doc_ids must be comma-separated integers") from None
     with db.connect() as conn:
         thread, project, docs, history = load_chat_context(conn, thread_id, ids)
     system = gemma.build_system_prompt(project, docs)

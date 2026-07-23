@@ -38,6 +38,15 @@ def test_budget_404_on_missing_thread(client, fake_tokens):
     assert client.get("/api/threads/999/budget").status_code == 404
 
 
+def test_budget_400_on_non_integer_doc_ids(client, fake_tokens):
+    p = make_project(client)
+    t = make_thread(client, p["id"])
+    # doc_ids가 정수 목록이 아니면 500이 아니라 400으로 거부 (파싱은 gemma 호출 전)
+    res = client.get(f"/api/threads/{t['id']}/budget", params={"doc_ids": "abc"})
+    assert res.status_code == 400
+    assert "doc_ids" in res.json()["detail"]
+
+
 def test_chat_rejected_with_413_when_over_limit(client, monkeypatch):
     from server import gemma
 

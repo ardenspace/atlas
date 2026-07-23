@@ -95,8 +95,8 @@ def init() -> None:
         legacy = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='projects'"
         ).fetchone()
-        conn.executescript(_MIGRATE_V1 if (version == 0 and legacy) else SCHEMA)
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        conn.commit()
+        # 마이그레이션 + 버전 올림을 한 트랜잭션으로 — 중간 크래시 시 반쯤 적용된 DB를 남기지 않는다
+        script = _MIGRATE_V1 if (version == 0 and legacy) else SCHEMA
+        conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {SCHEMA_VERSION};\nCOMMIT;")
     finally:
         conn.close()

@@ -73,6 +73,35 @@ async def test_context_limit_and_count_tokens():
 
 
 @pytest.mark.anyio
+async def test_context_limit_none_on_non_json_body():
+    # 200이지만 본문이 JSON이 아님 (프록시/터널 오류 페이지) → 500이 아니라 None으로 강등
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=b"<html>error</html>"))
+    assert await gemma.context_limit(transport=transport) is None
+
+
+@pytest.mark.anyio
+async def test_count_tokens_estimates_on_non_json_body():
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=b"<html>error</html>"))
+    n, exact = await gemma.count_tokens("가" * 30, transport=transport)
+    assert n == 20 and exact is False
+
+
+@pytest.mark.anyio
+async def test_stream_chat_skips_malformed_sse_lines():
+    # 정상 delta → 깨진 json → data: null(JSON은 유효하나 TypeError) → 정상 delta
+    mixed = (
+        b'data: {"choices":[{"delta":{"content":"\xec\x95\x88"}}]}\n\n'
+        b"data: not json\n\n"
+        b"data: null\n\n"
+        b'data: {"choices":[{"delta":{"content":"\xeb\x85\x95"}}]}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=mixed))
+    out = [d async for d in gemma.stream_chat("sys", [], transport=transport)]
+    assert out == ["안", "녕"]
+
+
+@pytest.mark.anyio
 async def test_count_tokens_estimates_when_unreachable():
     def boom(req):
         raise httpx.ConnectError("refused", request=req)

@@ -102,3 +102,29 @@ def test_migrates_v1_db(tmp_path, monkeypatch):
         conn.execute("INSERT INTO docs (project_id, kind, title, content) VALUES (1, 'idea', 'i', 'c')")
 
     db.init()  # 멱등성: 두 번 불러도 무해
+
+
+def test_migration_is_atomic_on_error(tmp_path, monkeypatch):
+    path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(V1_SCHEMA)
+    raw.execute("INSERT INTO projects (slug, name) VALUES ('p', 'P')")
+    raw.execute("INSERT INTO docs (project_id, kind, title, content) VALUES (1, 'research', '리포트', '본문')")
+    raw.commit()
+    raw.close()
+
+    monkeypatch.setenv("ATLAS_DB", str(path))
+    from server import db
+
+    # docs를 rename한 뒤 깨진 SQL — 마이그레이션이 원자적이면 rename까지 롤백돼야 한다
+    monkeypatch.setattr(db, "_MIGRATE_V1", "ALTER TABLE docs RENAME TO docs_v1;\nINVALID SQL STATEMENT;")
+    with pytest.raises(sqlite3.OperationalError):
+        db.init()
+
+    conn = sqlite3.connect(path)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "docs" in tables and "docs_v1" not in tables  # rename 롤백됨
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0  # 버전 그대로
+    finally:
+        conn.close()
