@@ -3,14 +3,16 @@
 Run: uv run uvicorn server.main:app --host 0.0.0.0 --port 8787
 """
 import json
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 
 from . import db, gemma
 
@@ -29,15 +31,27 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 HISTORY_LIMIT = 30
 
 
+Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
 class ProjectIn(BaseModel):
-    name: str
+    name: Name
     brief: str = ""
 
 
+class ProjectPatch(BaseModel):
+    name: Name | None = None
+    brief: str | None = None
+
+
 class DocIn(BaseModel):
-    kind: str  # research | world | note
-    title: str
+    kind: Literal["idea", "research", "world", "note"]
+    title: Name
     content: str
+
+
+class ThreadIn(BaseModel):
+    title: Name
 
 
 class ChatIn(BaseModel):
@@ -68,7 +82,7 @@ def create_project(p: ProjectIn):
                 "INSERT INTO projects (slug, name, brief) VALUES (?, ?, ?)",
                 (slugify(p.name), p.name, p.brief),
             )
-        except db.sqlite3.IntegrityError:
+        except sqlite3.IntegrityError:
             raise HTTPException(409, "project with same slug exists")
         row = conn.execute("SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)).fetchone()
     return dict(row)
@@ -86,20 +100,50 @@ def get_project(project_id: int):
     with db.connect() as conn:
         project = get_project_or_404(conn, project_id)
         docs = conn.execute(
-            "SELECT id, kind, title, created_at FROM docs WHERE project_id = ? ORDER BY id",
+            "SELECT id, kind, title, created_at, updated_at FROM docs WHERE project_id = ? ORDER BY id",
             (project_id,),
         ).fetchall()
-        messages = conn.execute(
-            "SELECT role, content, created_at FROM messages WHERE project_id = ? ORDER BY id",
+        threads = conn.execute(
+            "SELECT id, title, archived, created_at FROM threads WHERE project_id = ? ORDER BY id DESC",
             (project_id,),
         ).fetchall()
-    return {"project": project, "docs": [dict(d) for d in docs], "messages": [dict(m) for m in messages]}
+    return {"project": project, "docs": [dict(d) for d in docs], "threads": [dict(t) for t in threads]}
+
+
+@app.patch("/api/projects/{project_id}")
+def update_project(project_id: int, patch: ProjectPatch):
+    fields = patch.model_dump(exclude_none=True)
+    with db.connect() as conn:
+        project = get_project_or_404(conn, project_id)
+        if not fields:
+            return project
+        if "name" in fields:
+            fields["slug"] = slugify(fields["name"])
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        try:
+            conn.execute(f"UPDATE projects SET {sets} WHERE id = ?", (*fields.values(), project_id))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "project with same slug exists")
+        return dict(conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone())
+
+
+@app.delete("/api/projects/{project_id}", status_code=204)
+def delete_project(project_id: int):
+    with db.connect() as conn:
+        get_project_or_404(conn, project_id)
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+
+@app.post("/api/projects/{project_id}/threads", status_code=201)
+def create_thread(project_id: int, t: ThreadIn):
+    with db.connect() as conn:
+        get_project_or_404(conn, project_id)
+        cur = conn.execute("INSERT INTO threads (project_id, title) VALUES (?, ?)", (project_id, t.title))
+        return dict(conn.execute("SELECT * FROM threads WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
 @app.post("/api/projects/{project_id}/docs", status_code=201)
 def add_doc(project_id: int, doc: DocIn):
-    if doc.kind not in ("research", "world", "note"):
-        raise HTTPException(422, "kind must be research|world|note")
     with db.connect() as conn:
         get_project_or_404(conn, project_id)
         cur = conn.execute(
