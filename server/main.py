@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StringConstraints
 
@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="atlas", lifespan=lifespan)
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+DIST_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 # 대화 컨텍스트에 넣는 최근 메시지 수 — Gemma 컨텍스트 한도 보호용
 HISTORY_LIMIT = 30
@@ -411,9 +411,6 @@ async def thread_budget(thread_id: int, doc_ids: str | None = None):
     }
 
 
-@app.get("/")
-def index():
-    return FileResponse(WEB_DIR / "index.html")
-
-
-app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+# 빌드된 프론트(web/dist) 서빙 — dist가 없으면(개발·테스트) 비-API 경로는 404, 서버는 정상 기동.
+# 마운트는 라우트 테이블 마지막에 매칭되므로 /api/*를 가리지 않는다.
+app.mount("/", StaticFiles(directory=DIST_DIR, html=True, check_dir=False), name="web")

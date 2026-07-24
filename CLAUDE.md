@@ -12,13 +12,22 @@
 - 대화는 프로젝트당 다중 스레드. `POST /api/threads/{id}/settle`이 대화를 문서 초안으로
   정리해 스트리밍하고(저장은 클라이언트 몫), `GET /api/threads/{id}/budget`이 컨텍스트
   예산을 보고한다 (llama `/tokenize`·`/props` 기반, 서버 부재 시 추정치).
-- `web/` — 구 바닐라 UI (v2 API와 불일치, React+Vite로 대체 예정 — 계획 2).
-- 테스트: `uv run pytest` — llama-server를 절대 직접 치지 않는다 (모킹/MockTransport).
+- `web/` — React+Vite+TS(strict) UI. 3판 워크스페이스(사이드바/챗/문서 패널) +
+  문서 편집·정착 오버레이. dev는 5173(`cd web && npm run dev`, `/api`→8787 프록시),
+  프로덕션은 `npm run build` 후 FastAPI가 `web/dist`를 서빙 (dist 없으면 비-API 경로 404).
+  테스트: `cd web && npm test` — vitest+RTL+MSW, 모킹 누락 시 즉시 실패(onUnhandledRequest:
+  'error')라 8787/8080을 절대 치지 않는다.
+- 테스트: `uv run pytest` + `cd web && npm run typecheck && npm test` — llama-server를 절대 직접 치지 않는다 (모킹/MockTransport).
 
 ## 실행
 
 ```bash
+# 백엔드 (8787)
 uv run uvicorn server.main:app --host 0.0.0.0 --port 8787
+# 프론트 dev (5173, /api → 8787 프록시)
+cd web && npm run dev
+# 프로덕션: 빌드하면 8787 하나로 서빙
+cd web && npm run build
 ```
 
 ## 포트 사용 규약

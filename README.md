@@ -10,19 +10,30 @@
 
 ```bash
 uv sync
+# 백엔드 (8787)
 uv run uvicorn server.main:app --host 0.0.0.0 --port 8787
-# 브라우저에서 http://localhost:8787
+# 프론트 프로덕션: 빌드하면 8787 하나로 서빙 → http://localhost:8787
+cd web && npm install && npm run build
 ```
+
+프론트 개발은 Vite dev 서버로:
+
+```bash
+cd web && npm run dev   # 5173, /api → 8787 프록시
+```
+
+React+Vite+TS UI. `web/dist`가 없으면(빌드 전) FastAPI는 비-API 경로에 404를 준다.
 
 전제: llama-server가 :8080에 Gemma를 띄워둔 상태여야 챗이 동작한다 (안 떠 있어도 프로젝트/문서 관리는 됨).
 
 ## 테스트
 
 ```bash
-uv run pytest
+uv run pytest                              # 백엔드
+cd web && npm run typecheck && npm test    # 프론트 (vitest+RTL+MSW)
 ```
 
-llama-server 없이 전부 돈다 (Gemma 연동은 모킹).
+llama-server 없이 전부 돈다 (Gemma 연동은 모킹, 프론트는 MSW).
 
 ## 조사 돌리기
 
