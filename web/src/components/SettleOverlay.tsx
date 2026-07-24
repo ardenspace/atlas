@@ -78,21 +78,23 @@ export function SettleOverlay({ projectId, threadId, onClose }: SettleOverlayPro
     abortRef.current?.abort()
   }
 
-  async function save(p: Extract<Phase, { step: 'edit' }>) {
+  // 실패 시 편집 화면을 열어둔 채 서버 detail을 그대로 표시 (성공 시에만 onClose) — DocEditor와 동일 패턴
+  const saveError = createDoc.error ?? updateDoc.error
+  const saving = createDoc.isPending || updateDoc.isPending
+
+  function save(p: Extract<Phase, { step: 'edit' }>) {
     if (!p.title.trim()) return
     if (p.targetDocId === null) {
-      await createDoc.mutateAsync({
-        projectId,
-        doc: { kind: p.kind, title: p.title, content: p.content },
-      })
+      createDoc.mutate(
+        { projectId, doc: { kind: p.kind, title: p.title, content: p.content } },
+        { onSuccess: onClose },
+      )
     } else {
-      await updateDoc.mutateAsync({
-        id: p.targetDocId,
-        projectId,
-        patch: { kind: p.kind, title: p.title, content: p.content },
-      })
+      updateDoc.mutate(
+        { id: p.targetDocId, projectId, patch: { kind: p.kind, title: p.title, content: p.content } },
+        { onSuccess: onClose },
+      )
     }
-    onClose()
   }
 
   function discard() {
@@ -177,13 +179,20 @@ export function SettleOverlay({ projectId, threadId, onClose }: SettleOverlayPro
               value={phase.content}
               onChange={(e) => setPhase({ ...phase, content: e.target.value })}
             />
+            {saveError !== null && (
+              <p className="settle-error">
+                {saveError instanceof ApiError
+                  ? saveError.detail
+                  : '요청에 실패했어요. 서버가 떠 있는지 확인하세요.'}
+              </p>
+            )}
             <div className="overlay-foot">
               <button type="button" className="danger" onClick={discard}>버리기</button>
               <button
                 type="button"
                 className="primary"
-                onClick={() => void save(phase)}
-                disabled={!phase.title.trim()}
+                onClick={() => save(phase)}
+                disabled={!phase.title.trim() || saving}
               >
                 저장
               </button>

@@ -87,3 +87,32 @@ test('삭제는 confirm 후 DELETE, 새 문서에는 삭제 버튼이 없다', a
   renderWithClient(<DocEditor projectId={1} docId="new" onClose={onClose} />)
   expect(screen.queryByRole('button', { name: '삭제' })).not.toBeInTheDocument()
 })
+
+test('저장 실패 시 서버 detail을 그대로 보여주고 닫히지 않는다', async () => {
+  const onClose = vi.fn()
+  const detail = '문서를 찾을 수 없어요.'
+  server.use(
+    http.get('/api/docs/5', () => HttpResponse.json(makeDoc({ id: 5, title: '문서', content: '본문' }))),
+    http.put('/api/docs/5', () => HttpResponse.json({ detail }, { status: 404 })),
+  )
+  renderWithClient(<DocEditor projectId={1} docId={5} onClose={onClose} />)
+  await screen.findByLabelText('제목')
+  await userEvent.click(screen.getByRole('button', { name: '저장' }))
+  expect(await screen.findByText(detail)).toBeInTheDocument()
+  expect(onClose).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('본문')).toHaveValue('본문') // 내용 보존
+})
+
+test('삭제 실패 시 서버 detail을 그대로 보여주고 닫히지 않는다', async () => {
+  const onClose = vi.fn()
+  const detail = '삭제에 실패했어요.'
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  server.use(
+    http.get('/api/docs/5', () => HttpResponse.json(makeDoc({ id: 5, title: '문서' }))),
+    http.delete('/api/docs/5', () => HttpResponse.json({ detail }, { status: 500 })),
+  )
+  renderWithClient(<DocEditor projectId={1} docId={5} onClose={onClose} />)
+  await userEvent.click(await screen.findByRole('button', { name: '삭제' }))
+  expect(await screen.findByText(detail)).toBeInTheDocument()
+  expect(onClose).not.toHaveBeenCalled()
+})

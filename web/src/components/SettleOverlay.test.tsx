@@ -127,3 +127,20 @@ test('버리기: confirm 후 문서 API 호출 없이 닫는다', async () => {
   expect(onClose).toHaveBeenCalled()
   expect(docCalls).toBe(0)
 })
+
+test('저장 실패 시 서버 detail을 그대로 보여주고 편집 화면에 남는다', async () => {
+  const onClose = vi.fn()
+  const detail = '저장에 실패했어요.'
+  server.use(
+    projectHandler(),
+    http.post('/api/threads/7/settle', () => sseResponse([{ delta: '초안 본문' }, '[DONE]'])),
+    http.post('/api/projects/1/docs', () => HttpResponse.json({ detail }, { status: 500 })),
+  )
+  renderWithClient(<SettleOverlay projectId={1} threadId={7} onClose={onClose} />)
+  await userEvent.click(await screen.findByRole('button', { name: '초안 생성' }))
+  await screen.findByLabelText('본문')
+  await userEvent.click(screen.getByRole('button', { name: '저장' }))
+  expect(await screen.findByText(detail)).toBeInTheDocument()
+  expect(onClose).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('본문')).toHaveValue('초안 본문') // 초안 보존
+})

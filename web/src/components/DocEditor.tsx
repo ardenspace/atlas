@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ApiError } from '../api/client'
 import { useCreateDoc, useDeleteDoc, useDoc, useUpdateDoc } from '../api/hooks'
 import type { Doc, DocKind } from '../api/types'
 import { Markdown } from './Markdown'
@@ -33,21 +34,26 @@ function DocEditorForm({
   const updateDoc = useUpdateDoc()
   const deleteDoc = useDeleteDoc()
 
-  async function save() {
+  // 실패 시 다이얼로그를 열어둔 채 서버 detail을 그대로 표시 (성공 시에만 onClose)
+  const mutationError = createDoc.error ?? updateDoc.error ?? deleteDoc.error
+  const saving = createDoc.isPending || updateDoc.isPending
+
+  function save() {
     if (!title.trim()) return
     if (doc === null) {
-      await createDoc.mutateAsync({ projectId, doc: { kind, title, content } })
+      createDoc.mutate({ projectId, doc: { kind, title, content } }, { onSuccess: onClose })
     } else {
-      await updateDoc.mutateAsync({ id: doc.id, projectId, patch: { kind, title, content } })
+      updateDoc.mutate(
+        { id: doc.id, projectId, patch: { kind, title, content } },
+        { onSuccess: onClose },
+      )
     }
-    onClose()
   }
 
-  async function remove() {
+  function remove() {
     if (doc === null) return
     if (!window.confirm(`"${doc.title}" 문서를 삭제할까요?`)) return
-    await deleteDoc.mutateAsync({ id: doc.id, projectId })
-    onClose()
+    deleteDoc.mutate({ id: doc.id, projectId }, { onSuccess: onClose })
   }
 
   return (
@@ -81,12 +87,19 @@ function DocEditorForm({
             onChange={(e) => setContent(e.target.value)}
           />
         )}
+        {mutationError !== null && (
+          <p className="settle-error">
+            {mutationError instanceof ApiError
+              ? mutationError.detail
+              : '요청에 실패했어요. 서버가 떠 있는지 확인하세요.'}
+          </p>
+        )}
         <div className="overlay-foot">
           {doc !== null && (
-            <button type="button" className="danger" onClick={() => void remove()}>삭제</button>
+            <button type="button" className="danger" onClick={remove}>삭제</button>
           )}
           <button type="button" onClick={onClose}>닫기</button>
-          <button type="button" className="primary" onClick={() => void save()} disabled={!title.trim()}>
+          <button type="button" className="primary" onClick={save} disabled={!title.trim() || saving}>
             저장
           </button>
         </div>
