@@ -291,6 +291,8 @@ async def chat(thread_id: int, body: ChatIn):
     if limit is not None:
         history_text = "".join(m["content"] for m in history)
         used, _ = await gemma.count_tokens(system + history_text + body.message)
+        # 원문 토큰에 더해 메시지당 챗 템플릿 래퍼 오버헤드(system + 히스토리 + 새 user 메시지)
+        used += gemma.TEMPLATE_OVERHEAD_PER_MSG * (len(history) + 2)
         if used > limit - gemma.RESPONSE_RESERVE:
             raise HTTPException(
                 413,
@@ -355,6 +357,8 @@ async def settle(thread_id: int, body: SettleIn):
     limit = await gemma.context_limit()
     if limit is not None:
         used, _ = await gemma.count_tokens(system + prompt_messages[0]["content"])
+        # 메시지당 챗 템플릿 래퍼 오버헤드 (system + 대화 기록 메시지 = 2)
+        used += gemma.TEMPLATE_OVERHEAD_PER_MSG * 2
         if used > limit - gemma.RESPONSE_RESERVE:
             raise HTTPException(
                 413,
@@ -374,6 +378,7 @@ async def settle(thread_id: int, body: SettleIn):
 
 @app.get("/api/threads/{thread_id}/budget")
 async def thread_budget(thread_id: int, doc_ids: str | None = None):
+    # 빈 문자열 → [] (문서 없이), 파라미터 생략 → None (전체 문서) — ChatIn.doc_ids 시맨틱과 일치
     try:
         ids = [int(x) for x in doc_ids.split(",") if x.strip()] if doc_ids is not None else None
     except ValueError:

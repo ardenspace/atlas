@@ -80,6 +80,47 @@ def test_budget_400_on_non_integer_doc_ids(client, fake_tokens):
     assert "doc_ids" in res.json()["detail"]
 
 
+def test_budget_empty_doc_ids_means_no_docs(client, fake_tokens):
+    # 빈 문자열 doc_ids=[] (문서 없이) vs 파라미터 생략=전체 문서 — 두 시맨틱을 구분한다
+    p = make_project(client)
+    t = make_thread(client, p["id"])
+    client.post(f"/api/projects/{p['id']}/docs", json={"kind": "idea", "title": "기획", "content": "가"})
+    # 빈 문자열 → 문서 없이
+    body = client.get(f"/api/threads/{t['id']}/budget", params={"doc_ids": ""}).json()
+    assert body["docs"] == []
+    # 파라미터 생략 → 전체 문서 등장
+    body = client.get(f"/api/threads/{t['id']}/budget").json()
+    assert [d["title"] for d in body["docs"]] == ["기획"]
+
+
+def test_chat_413_guard_counts_template_overhead(client, monkeypatch):
+    # 원문 토큰만으로는 가드를 통과하지만 메시지당 템플릿 래퍼 오버헤드를 더하면 넘겨야 413
+    from server import gemma
+
+    async def fake_limit(**kw):
+        return 3000
+
+    async def fake_count(text, **kw):
+        return 3000 - gemma.RESPONSE_RESERVE - 5, True  # 947 — 원문만으론 952 아래
+
+    async def fake_stream(system, messages, **kw):
+        raise AssertionError("413 guard bypassed — stream_chat must not be reached")
+        yield  # pragma: no cover — async generator 형태 유지용
+
+    monkeypatch.setattr(gemma, "context_limit", fake_limit)
+    monkeypatch.setattr(gemma, "count_tokens", fake_count)
+    monkeypatch.setattr(gemma, "stream_chat", fake_stream)
+
+    p = make_project(client)
+    t = make_thread(client, p["id"])
+    # 히스토리 없음 → 오버헤드 (0+2)*10=20; 947+20=967 > 952 → 413
+    res = client.post(f"/api/threads/{t['id']}/chat", json={"message": "하이"})
+    assert res.status_code == 413
+    assert "컨텍스트" in res.json()["detail"]
+    # 거부된 요청은 user 메시지도 저장하지 않는다
+    assert client.get(f"/api/threads/{t['id']}").json()["messages"] == []
+
+
 def test_chat_rejected_with_413_when_over_limit(client, monkeypatch):
     from server import gemma
 

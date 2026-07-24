@@ -10,6 +10,9 @@ LLAMA_BASE = os.environ.get("ATLAS_LLAMA_BASE", "http://127.0.0.1:8080")
 # 응답 생성용으로 남겨두는 컨텍스트 여유 (토큰)
 RESPONSE_RESERVE = 2048
 
+# 메시지당 챗 템플릿 래퍼(<start_of_turn> 등) 토큰 오버헤드 — 보수적 추정
+TEMPLATE_OVERHEAD_PER_MSG = 10
+
 KIND_LABEL = {"idea": "기획", "research": "조사 리포트", "world": "세계관 문서", "note": "노트"}
 KIND_ORDER = ["idea", "research", "world", "note"]
 
@@ -112,9 +115,10 @@ async def stream_chat(
                         break
                     try:
                         delta = json.loads(data)["choices"][0]["delta"]
-                    except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                        content = delta.get("content")
+                    except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
                         continue  # 깨진 SSE 라인은 건너뛰고 스트림은 유지
-                    if content := delta.get("content"):
+                    if content:
                         yield content
     except httpx.TransportError as e:
         raise GemmaUnreachable() from e

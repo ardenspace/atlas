@@ -110,3 +110,30 @@ def test_settle_rejected_with_413_when_over_limit(client, monkeypatch):
     res = client.post(f"/api/threads/{t['id']}/settle", json={})
     assert res.status_code == 413
     assert "컨텍스트" in res.json()["detail"]
+
+
+def test_settle_413_guard_counts_template_overhead(client, monkeypatch):
+    # 원문 토큰만으로는 가드를 통과하지만 메시지당 템플릿 래퍼 오버헤드를 더하면 넘겨야 413
+    from server import db, gemma
+
+    async def fake_limit(**kw):
+        return 3000
+
+    async def fake_count(text, **kw):
+        return 3000 - gemma.RESPONSE_RESERVE - 5, True  # 947 — 원문만으론 952 아래
+
+    async def fake_stream(system, messages, **kw):
+        raise AssertionError("413 guard bypassed — stream_chat must not be reached")
+        yield  # pragma: no cover — async generator 형태 유지용
+
+    monkeypatch.setattr(gemma, "context_limit", fake_limit)
+    monkeypatch.setattr(gemma, "count_tokens", fake_count)
+    monkeypatch.setattr(gemma, "stream_chat", fake_stream)
+
+    p, t = _thread_with_chat(client)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', 'hi')", (t["id"],))
+    # system + transcript = 2 메시지 → 오버헤드 2*10=20; 947+20=967 > 952 → 413
+    res = client.post(f"/api/threads/{t['id']}/settle", json={})
+    assert res.status_code == 413
+    assert "컨텍스트" in res.json()["detail"]

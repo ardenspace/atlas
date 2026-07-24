@@ -102,6 +102,20 @@ async def test_stream_chat_skips_malformed_sse_lines():
 
 
 @pytest.mark.anyio
+async def test_stream_chat_skips_non_dict_delta():
+    # delta가 JSON으로는 유효하나 dict가 아님(null) → .get에서 AttributeError나도 스트림은 유지돼야 한다
+    mixed = (
+        b'data: {"choices":[{"delta":{"content":"\xec\x95\x88"}}]}\n\n'
+        b'data: {"choices":[{"delta":null}]}\n\n'
+        b'data: {"choices":[{"delta":{"content":"\xeb\x85\x95"}}]}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=mixed))
+    out = [d async for d in gemma.stream_chat("sys", [], transport=transport)]
+    assert out == ["안", "녕"]
+
+
+@pytest.mark.anyio
 async def test_count_tokens_estimates_when_unreachable():
     def boom(req):
         raise httpx.ConnectError("refused", request=req)
