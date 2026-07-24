@@ -411,6 +411,7 @@ async def thread_budget(thread_id: int, doc_ids: str | None = None):
     }
 
 
-# 빌드된 프론트(web/dist) 서빙 — dist가 없으면(개발·테스트) 비-API 경로는 404, 서버는 정상 기동.
+# 빌드된 프론트(web/dist) 서빙 — dist가 아예 없으면(빌드 전) starlette check_config가 첫 비-API
+# 요청에서 RuntimeError→500 (서버 기동·/api/*는 정상). dist가 있고 경로만 없으면 404.
 # 마운트는 라우트 테이블 마지막에 매칭되므로 /api/*를 가리지 않는다.
 app.mount("/", StaticFiles(directory=DIST_DIR, html=True, check_dir=False), name="web")

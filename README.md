@@ -22,7 +22,7 @@ cd web && npm install && npm run build
 cd web && npm run dev   # 5173, /api → 8787 프록시
 ```
 
-React+Vite+TS UI. `web/dist`가 없으면(빌드 전) FastAPI는 비-API 경로에 404를 준다.
+React+Vite+TS UI. `web/dist`가 없으면(빌드 전) 비-API 경로는 500이 난다 — `/api/*`는 그대로 동작하고, `npm run build` 후 정상 서빙된다.
 
 전제: llama-server가 :8080에 Gemma를 띄워둔 상태여야 챗이 동작한다 (안 떠 있어도 프로젝트/문서 관리는 됨).
 

@@ -14,7 +14,8 @@
   예산을 보고한다 (llama `/tokenize`·`/props` 기반, 서버 부재 시 추정치).
 - `web/` — React+Vite+TS(strict) UI. 3판 워크스페이스(사이드바/챗/문서 패널) +
   문서 편집·정착 오버레이. dev는 5173(`cd web && npm run dev`, `/api`→8787 프록시),
-  프로덕션은 `npm run build` 후 FastAPI가 `web/dist`를 서빙 (dist 없으면 비-API 경로 404).
+  프로덕션은 `npm run build` 후 FastAPI가 `web/dist`를 서빙 (빌드 전엔 dist가 없어
+  비-API 경로 500 — 서버·`/api/*`는 정상. dist가 있고 경로만 없으면 404).
   테스트: `cd web && npm test` — vitest+RTL+MSW, 모킹 누락 시 즉시 실패(onUnhandledRequest:
   'error')라 8787/8080을 절대 치지 않는다.
 - 테스트: `uv run pytest` + `cd web && npm run typecheck && npm test` — llama-server를 절대 직접 치지 않는다 (모킹/MockTransport).
