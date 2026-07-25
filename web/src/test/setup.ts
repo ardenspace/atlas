@@ -11,6 +11,26 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   return origFetch(input, init)
 }) as typeof fetch
 
+// jsdom엔 matchMedia가 없다 — __vpMobile 플래그 기반 모킹 (기본: 데스크톱)
+beforeEach(() => {
+  ;(globalThis as any).__vpMobile = false
+})
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    get matches() {
+      return query.includes('max-width') && (globalThis as any).__vpMobile === true
+    },
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    onchange: null,
+    dispatchEvent: () => false,
+    addListener: () => {},
+    removeListener: () => {},
+  }),
+})
+
 // 모킹 안 된 요청은 즉시 실패 — NO LIVE 강제
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers())
