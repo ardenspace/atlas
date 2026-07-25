@@ -61,7 +61,7 @@ def test_threads_ordered_by_last_activity(client):
     ids = [t["id"] for t in client.get(f"/api/projects/{p['id']}").json()["threads"]]
     assert ids == [t2["id"], t1["id"]]
 
-    # t1에 "더 최근" 메시지가 생기면 t1이 위로 — 타임스탐프를 직접 심는다
+    # t1에 "더 최근" 메시지가 생기면 t1이 위로 — 타임스탬프를 직접 심는다
     from server import db
     with db.connect() as conn:
         conn.execute(

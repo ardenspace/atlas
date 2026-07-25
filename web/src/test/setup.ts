@@ -12,6 +12,9 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch
 
 // jsdom엔 matchMedia가 없다 — __vpMobile 플래그 기반 모킹 (기본: 데스크톱)
+// useIsMobile이 쓰는 쿼리 문자열과 정확히 일치할 때만 모바일로 취급한다 (max-width 포함 여부로만
+// 판별하면 나중에 두 번째 브레이크포인트가 생겼을 때 그것도 모바일로 잘못 응답하게 된다)
+const MOBILE_QUERY = '(max-width: 768px)'
 beforeEach(() => {
   ;(globalThis as any).__vpMobile = false
 })
@@ -19,7 +22,7 @@ Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: (query: string) => ({
     get matches() {
-      return query.includes('max-width') && (globalThis as any).__vpMobile === true
+      return query === MOBILE_QUERY && (globalThis as any).__vpMobile === true
     },
     media: query,
     addEventListener: () => {},

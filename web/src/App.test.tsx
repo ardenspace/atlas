@@ -134,6 +134,27 @@ test('모바일: 문서 버튼 → 하단 시트(정착 버튼 포함)', async (
   await waitFor(() => expect(screen.queryByRole('button', { name: '정착' })).not.toBeInTheDocument())
 })
 
+test('모바일: 오버레이가 뜬 채로 뒤로가기하면 오버레이도 닫히고 목록으로 복귀한다', async () => {
+  ;(globalThis as any).__vpMobile = true
+  server.use(...baseHandlers())
+  renderWithClient(<App />)
+
+  // 채팅 → 시트 → 문서 오버레이까지 연다
+  await userEvent.click(await screen.findByText('용 대화'))
+  await userEvent.click(await screen.findByRole('button', { name: '문서 패널 열기' }))
+  await userEvent.click(await screen.findByText('세계관 문서'))
+  expect(await screen.findByRole('dialog', { name: '문서 편집' })).toBeInTheDocument()
+
+  // 클릭이 아니라 하드웨어 뒤로가기(popstate)로 나간다 — 오버레이가 고아로 남으면 안 된다
+  window.dispatchEvent(new PopStateEvent('popstate'))
+
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: '문서 편집' })).not.toBeInTheDocument(),
+  )
+  expect(await screen.findByText('프로젝트')).toBeInTheDocument()
+  expect(screen.queryByLabelText('메시지 입력')).not.toBeInTheDocument()
+})
+
 test('모바일: 챗 화면 도중 현재 프로젝트가 사라지면(다른 세션 삭제 등) 목록으로 복귀한다', async () => {
   ;(globalThis as any).__vpMobile = true
   server.use(...baseHandlers())

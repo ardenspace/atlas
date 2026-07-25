@@ -179,5 +179,6 @@ textarea.overlay-body { resize: none; color: var(--text); font: inherit; width: 
   position: absolute; left: 0; right: 0; bottom: 0; max-height: 70dvh;
   background: var(--panel); border-top: 1px solid var(--line);
   border-radius: 16px 16px 0 0; display: flex; overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
 }
 .sheet .docs-panel { flex: 1; border-left: none; }

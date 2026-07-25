@@ -42,11 +42,14 @@ export default function App() {
     if (first) setThreadId(first.id)
   }, [detail.data, threadId])
 
-  // 모바일 뒤로가기 제스처/버튼(popstate) → 목록 화면 + 시트 닫힘으로 복귀
+  // 모바일 뒤로가기 제스처/버튼(popstate) → 목록 화면 + 시트/오버레이 닫힘으로 복귀
+  // (오버레이를 안 닫으면 전체화면 모달이 목록 위에 그대로 떠 있고, 이미 소비된 history 엔트리
+  // 때문에 다음 뒤로가기에서 바로 앱을 벗어나 버린다)
   useEffect(() => {
     function onPop() {
       setMobileView('home')
       setSheetOpen(false)
+      setOverlay(null)
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
@@ -60,6 +63,8 @@ export default function App() {
   }, [isMobile, mobileView, threadId])
 
   function selectProject(id: number | null) {
+    // 같은 프로젝트 재클릭은 무시: 없으면 위 자동 선택 effect가 골라둔 threadId가
+    // 이 재클릭 한 번으로 null로 날아간다 (사용자가 직접 null을 고를 방법은 없다 — 의도된 트레이드오프)
     if (id === projectId) return
     setProjectId(id)
     setThreadId(null)
