@@ -1,0 +1,11 @@
+# atlas Cloudflare Tunnel — atlas.ardenspace.com → localhost:8787
+# 실행: cloudflared tunnel --config infra/cloudflared/atlas-config.yml run atlas
+# credentials-file 은 ~/.cloudflared 의 creds(json) — 커밋 금지.
+# 주의: Cloudflare Access(이메일 허용 목록) 없이 터널을 켜면 공개 인터넷에 노출된다.
+tunnel: e7a047b3-2acb-4a69-ab8e-fbaca75d0c48
+credentials-file: /Users/arden/.cloudflared/e7a047b3-2acb-4a69-ab8e-fbaca75d0c48.json
+
+ingress:
+  - hostname: atlas.ardenspace.com
+    service: http://localhost:8787
+  - service: http_status:404
