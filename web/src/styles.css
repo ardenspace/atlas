@@ -13,8 +13,12 @@ button { font: inherit; cursor: pointer; }
 .dim { color: var(--dim); }
 .placeholder { color: var(--dim); margin: auto; }
 
-/* ---- 3판 배치 ---- */
-.app { display: grid; grid-template-columns: 240px 1fr 280px; height: 100%; }
+/* ---- 3판 배치 ----
+   행을 뷰포트 높이에 고정해 페이지 스크롤을 없앤다 — 스크롤은 각 판 내부(.chat-log 등)만. */
+.app {
+  display: grid; grid-template-columns: 240px 1fr 280px;
+  grid-template-rows: minmax(0, 1fr); height: 100dvh; overflow: hidden;
+}
 
 /* ---- 사이드바 ---- */
 .sidebar {
