@@ -9,9 +9,11 @@ import { Markdown } from './Markdown'
 interface ChatPaneProps {
   threadId: number
   docIds: number[] | null
+  onBack?: () => void
+  onOpenDocs?: () => void
 }
 
-export function ChatPane({ threadId, docIds }: ChatPaneProps) {
+export function ChatPane({ threadId, docIds, onBack, onOpenDocs }: ChatPaneProps) {
   const qc = useQueryClient()
   const { data } = useThread(threadId)
   const [input, setInput] = useState('')
@@ -66,7 +68,11 @@ export function ChatPane({ threadId, docIds }: ChatPaneProps) {
   return (
     <>
       <header className="chat-head">
+        {onBack && <button className="icon-btn" aria-label="목록으로" onClick={onBack}>←</button>}
         <h2>{data?.thread.title ?? ''}</h2>
+        {onOpenDocs && (
+          <button className="icon-btn" aria-label="문서 패널 열기" onClick={onOpenDocs}>☰</button>
+        )}
       </header>
       <div className="chat-log" ref={logRef}>
         {messages.length === 0 && !streaming && !chatError && (

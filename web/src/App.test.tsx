@@ -103,3 +103,48 @@ test('아카이브 스레드는 디폴트 선택에서 제외된다', async () =
   // 사이드바 버튼으로 한정해서 조회 (테스트 2·3에서 이미 적용한 것과 동일한 보강)
   expect((await screen.findByRole('button', { name: '용 대화' })).closest('li')).toHaveClass('active')
 })
+
+test('모바일: 목록에서 스레드를 탭해야 채팅으로, 뒤로가면 목록', async () => {
+  ;(globalThis as any).__vpMobile = true
+  server.use(...baseHandlers())
+  renderWithClient(<App />)
+
+  // home: 목록만 보이고 채팅 입력은 없다 (디폴트 스레드는 하이라이트만)
+  expect((await screen.findByText('용 대화')).closest('li')).toHaveClass('active')
+  expect(screen.queryByLabelText('메시지 입력')).not.toBeInTheDocument()
+
+  // 탭 → 채팅 진입
+  await userEvent.click(screen.getByText('용 대화'))
+  expect(await screen.findByLabelText('메시지 입력')).toBeInTheDocument()
+
+  // 뒤로 → home 복귀
+  await userEvent.click(screen.getByRole('button', { name: '목록으로' }))
+  expect(await screen.findByText('프로젝트')).toBeInTheDocument()
+  expect(screen.queryByLabelText('메시지 입력')).not.toBeInTheDocument()
+})
+
+test('모바일: 문서 버튼 → 하단 시트(정착 버튼 포함)', async () => {
+  ;(globalThis as any).__vpMobile = true
+  server.use(...baseHandlers())
+  renderWithClient(<App />)
+  await userEvent.click(await screen.findByText('용 대화'))
+  await userEvent.click(await screen.findByRole('button', { name: '문서 패널 열기' }))
+  expect(await screen.findByRole('button', { name: '정착' })).toBeInTheDocument()
+  await userEvent.click(screen.getByLabelText('시트 닫기'))
+  await waitFor(() => expect(screen.queryByRole('button', { name: '정착' })).not.toBeInTheDocument())
+})
+
+test('모바일: 챗 화면 도중 현재 프로젝트가 사라지면(다른 세션 삭제 등) 목록으로 복귀한다', async () => {
+  ;(globalThis as any).__vpMobile = true
+  server.use(...baseHandlers())
+  const { client } = renderWithClient(<App />)
+  await userEvent.click(await screen.findByText('용 대화'))
+  expect(await screen.findByLabelText('메시지 입력')).toBeInTheDocument()
+
+  // 다른 세션에서 현재 프로젝트가 삭제되어 목록에서 빠진 상황을 흉내낸다 (백그라운드 refetch로 무효 선택 감지)
+  server.use(http.get('/api/projects', () => HttpResponse.json([])))
+  await client.invalidateQueries({ queryKey: ['projects'] })
+
+  await waitFor(() => expect(screen.queryByLabelText('메시지 입력')).not.toBeInTheDocument())
+  expect(await screen.findByText('프로젝트')).toBeInTheDocument()
+})

@@ -161,3 +161,23 @@ textarea.overlay-body { resize: none; color: var(--text); font: inherit; width: 
 .markdown table { border-collapse: collapse; }
 .markdown th, .markdown td { border: 1px solid var(--line); padding: 4px 8px; }
 .markdown a { color: var(--accent); }
+
+/* ---- 모바일 (≤768px) ---- */
+@media (max-width: 768px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { border-right: none; }
+  .chat-head { display: flex; align-items: center; gap: 10px; }
+  .icon-btn {
+    background: none; border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; width: 30px; height: 30px; flex-shrink: 0;
+  }
+  .chat-head h2 { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 9; }
+.sheet-close { position: absolute; inset: 0; background: none; border: none; }
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; max-height: 70dvh;
+  background: var(--panel); border-top: 1px solid var(--line);
+  border-radius: 16px 16px 0 0; display: flex; overflow: hidden;
+}
+.sheet .docs-panel { flex: 1; border-left: none; }
