@@ -84,3 +84,20 @@ def test_projects_ordered_by_last_activity(client):
             (p2["id"],),
         )
     assert [p["id"] for p in client.get("/api/projects").json()] == [p2["id"], p1["id"]]
+
+
+def test_projects_lifted_by_new_thread(client):
+    p1 = client.post("/api/projects", json={"name": "먼저"}).json()
+    p2 = client.post("/api/projects", json={"name": "나중"}).json()
+    assert [p["id"] for p in client.get("/api/projects").json()] == [p2["id"], p1["id"]]
+
+    # 메시지 없이 스레드만 만들어도 p1이 위로 — 스레드 생성 시각을 직접 심는다
+    t = client.post(f"/api/projects/{p1['id']}/threads", json={"title": "t"}).json()
+    from server import db
+
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE threads SET created_at = datetime('now', '+1 hour') WHERE id = ?",
+            (t["id"],),
+        )
+    assert [p["id"] for p in client.get("/api/projects").json()] == [p1["id"], p2["id"]]

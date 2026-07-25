@@ -91,7 +91,10 @@ def list_projects():
               FROM threads t JOIN messages m ON m.thread_id = t.id
               GROUP BY t.project_id
             ) m ON m.project_id = p.id
-            ORDER BY MAX(p.created_at, COALESCE(d.at, p.created_at), COALESCE(m.at, p.created_at)) DESC,
+            LEFT JOIN (SELECT project_id, MAX(created_at) AS at FROM threads GROUP BY project_id) t
+              ON t.project_id = p.id
+            ORDER BY MAX(p.created_at, COALESCE(d.at, p.created_at), COALESCE(m.at, p.created_at),
+                         COALESCE(t.at, p.created_at)) DESC,
                      p.id DESC
             """
         ).fetchall()
@@ -133,7 +136,7 @@ def get_project(project_id: int):
             LEFT JOIN (SELECT thread_id, MAX(created_at) AS at FROM messages GROUP BY thread_id) m
               ON m.thread_id = t.id
             WHERE t.project_id = ?
-            ORDER BY COALESCE(m.at, t.created_at) DESC, t.id DESC
+            ORDER BY t.archived ASC, COALESCE(m.at, t.created_at) DESC, t.id DESC
             """,
             (project_id,),
         ).fetchall()

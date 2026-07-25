@@ -70,3 +70,21 @@ def test_threads_ordered_by_last_activity(client):
         )
     ids = [t["id"] for t in client.get(f"/api/projects/{p['id']}").json()["threads"]]
     assert ids == [t1["id"], t2["id"]]
+
+
+def test_archived_threads_sort_below_live_ones(client):
+    p = client.post("/api/projects", json={"name": "보관정렬"}).json()
+    live = client.post(f"/api/projects/{p['id']}/threads", json={"title": "살아있음"}).json()
+    archived = client.post(f"/api/projects/{p['id']}/threads", json={"title": "보관됨"}).json()
+
+    # 보관된 스레드가 더 최근 메시지를 갖고 있어도 살아있는 스레드 아래에 온다
+    from server import db
+
+    with db.connect() as conn:
+        conn.execute("UPDATE threads SET archived = 1 WHERE id = ?", (archived["id"],))
+        conn.execute(
+            "INSERT INTO messages (thread_id, role, content, created_at) VALUES (?, 'user', '안녕', datetime('now', '+1 hour'))",
+            (archived["id"],),
+        )
+    ids = [t["id"] for t in client.get(f"/api/projects/{p['id']}").json()["threads"]]
+    assert ids == [live["id"], archived["id"]]
