@@ -99,6 +99,7 @@ test('아카이브 스레드는 디폴트 선택에서 제외된다', async () =
   )
   renderWithClient(<App />)
   await screen.findByLabelText('메시지 입력')
-  // 살아있는 스레드(용 대화)가 선택됨 — 사이드바 active 확인
-  expect((await screen.findByText('용 대화')).closest('li')).toHaveClass('active')
+  // 살아있는 스레드(용 대화)가 선택됨 — 채팅 헤더도 같은 텍스트를 보여줄 수 있으므로
+  // 사이드바 버튼으로 한정해서 조회 (테스트 2·3에서 이미 적용한 것과 동일한 보강)
+  expect((await screen.findByRole('button', { name: '용 대화' })).closest('li')).toHaveClass('active')
 })
