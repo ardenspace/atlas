@@ -50,3 +50,23 @@ def test_empty_patch_returns_thread_unchanged(client):
 
 def test_delete_missing_thread_404(client):
     assert client.delete("/api/threads/999").status_code == 404
+
+
+def test_threads_ordered_by_last_activity(client):
+    p = client.post("/api/projects", json={"name": "정렬"}).json()
+    t1 = client.post(f"/api/projects/{p['id']}/threads", json={"title": "옛날"}).json()
+    t2 = client.post(f"/api/projects/{p['id']}/threads", json={"title": "최신생성"}).json()
+
+    # 생성순 동점(같은 초) → id DESC: t2 먼저
+    ids = [t["id"] for t in client.get(f"/api/projects/{p['id']}").json()["threads"]]
+    assert ids == [t2["id"], t1["id"]]
+
+    # t1에 "더 최근" 메시지가 생기면 t1이 위로 — 타임스탐프를 직접 심는다
+    from server import db
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO messages (thread_id, role, content, created_at) VALUES (?, 'user', '안녕', datetime('now', '+1 hour'))",
+            (t1["id"],),
+        )
+    ids = [t["id"] for t in client.get(f"/api/projects/{p['id']}").json()["threads"]]
+    assert ids == [t1["id"], t2["id"]]

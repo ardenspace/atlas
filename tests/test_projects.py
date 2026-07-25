@@ -58,3 +58,29 @@ def test_patch_rename_into_existing_slug_conflicts(client):
     # 충돌 시 원본은 보존된다 (롤백)
     assert client.get(f"/api/projects/{b['id']}").json()["project"]["slug"] == "둘째-이름"
     assert client.get(f"/api/projects/{a['id']}").json()["project"]["slug"] == "첫-이름"
+
+
+def test_projects_ordered_by_last_activity(client):
+    p1 = client.post("/api/projects", json={"name": "먼저"}).json()
+    p2 = client.post("/api/projects", json={"name": "나중"}).json()
+
+    # 생성 동점 → id DESC: p2 먼저
+    assert [p["id"] for p in client.get("/api/projects").json()] == [p2["id"], p1["id"]]
+
+    # p1 쪽 스레드에 미래 메시지 → p1이 위로
+    t = client.post(f"/api/projects/{p1['id']}/threads", json={"title": "t"}).json()
+    from server import db
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO messages (thread_id, role, content, created_at) VALUES (?, 'user', '안녕', datetime('now', '+1 hour'))",
+            (t["id"],),
+        )
+    assert [p["id"] for p in client.get("/api/projects").json()] == [p1["id"], p2["id"]]
+
+    # p2 쪽 문서를 더 미래로 갱신 → p2가 다시 위로
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO docs (project_id, kind, title, content, created_at, updated_at) VALUES (?, 'note', 'n', '', datetime('now'), datetime('now', '+2 hour'))",
+            (p2["id"],),
+        )
+    assert [p["id"] for p in client.get("/api/projects").json()] == [p2["id"], p1["id"]]

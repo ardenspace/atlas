@@ -81,7 +81,20 @@ async def health():
 @app.get("/api/projects")
 def list_projects():
     with db.connect() as conn:
-        rows = conn.execute("SELECT * FROM projects ORDER BY id DESC").fetchall()
+        rows = conn.execute(
+            """
+            SELECT p.* FROM projects p
+            LEFT JOIN (SELECT project_id, MAX(updated_at) AS at FROM docs GROUP BY project_id) d
+              ON d.project_id = p.id
+            LEFT JOIN (
+              SELECT t.project_id, MAX(m.created_at) AS at
+              FROM threads t JOIN messages m ON m.thread_id = t.id
+              GROUP BY t.project_id
+            ) m ON m.project_id = p.id
+            ORDER BY MAX(p.created_at, COALESCE(d.at, p.created_at), COALESCE(m.at, p.created_at)) DESC,
+                     p.id DESC
+            """
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -115,7 +128,13 @@ def get_project(project_id: int):
             (project_id,),
         ).fetchall()
         threads = conn.execute(
-            "SELECT id, title, archived, created_at FROM threads WHERE project_id = ? ORDER BY id DESC",
+            """
+            SELECT t.id, t.title, t.archived, t.created_at FROM threads t
+            LEFT JOIN (SELECT thread_id, MAX(created_at) AS at FROM messages GROUP BY thread_id) m
+              ON m.thread_id = t.id
+            WHERE t.project_id = ?
+            ORDER BY COALESCE(m.at, t.created_at) DESC, t.id DESC
+            """,
             (project_id,),
         ).fetchall()
     return {"project": project, "docs": [dict(d) for d in docs], "threads": [dict(t) for t in threads]}
