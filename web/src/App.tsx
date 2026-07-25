@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useProject, useProjects } from './api/hooks'
 import { ChatPane } from './components/ChatPane'
 import { DocEditor } from './components/DocEditor'
 import { DocsPanel } from './components/DocsPanel'
@@ -16,7 +17,28 @@ export default function App() {
 
   const docIds = threadId !== null ? (docSelection[threadId] ?? null) : null
 
+  const projects = useProjects()
+  const detail = useProject(projectId)
+
+  // 디폴트 선택: 선택이 없거나(삭제 등으로) 무효해졌을 때만 개입한다
+  useEffect(() => {
+    const list = projects.data
+    if (!list) return
+    if (projectId === null || !list.some((p) => p.id === projectId)) {
+      setProjectId(list[0]?.id ?? null)
+      setThreadId(null)
+    }
+  }, [projects.data, projectId])
+
+  useEffect(() => {
+    const threads = detail.data?.threads
+    if (!threads || threadId !== null) return
+    const first = threads.find((t) => !t.archived)
+    if (first) setThreadId(first.id)
+  }, [detail.data, threadId])
+
   function selectProject(id: number | null) {
+    if (id === projectId) return
     setProjectId(id)
     setThreadId(null)
   }
