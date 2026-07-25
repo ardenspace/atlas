@@ -9,6 +9,12 @@ body {
   background: var(--bg); color: var(--text);
   font-family: -apple-system, "Apple SD Gothic Neo", sans-serif; font-size: 14px;
 }
+/* ---- 스크롤바 ---- */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: #3d4150; }
 button { font: inherit; cursor: pointer; }
 .dim { color: var(--dim); }
 .placeholder { color: var(--dim); margin: auto; }
