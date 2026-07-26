@@ -11,13 +11,13 @@ config_checked를 리셋해 패치된 디렉터리로 재검사되게 한다 —
 """
 
 
-def _static_app():
+def _static_app(name="web"):
     from server.main import app
 
     for route in app.routes:
-        if getattr(route, "name", None) == "web":
+        if getattr(route, "name", None) == name:
             return route.app
-    raise AssertionError("web mount not found")
+    raise AssertionError(f"{name} mount not found")
 
 
 def _point_at(monkeypatch, static, directory):
@@ -43,3 +43,22 @@ def test_root_serves_index_when_dist_exists(client, tmp_path, monkeypatch):
     r = client.get("/")
     assert r.status_code == 200
     assert "atlas" in r.text
+
+
+def test_shared_docs_served_from_d(client, tmp_path, monkeypatch):
+    (tmp_path / "gangbyul_draft.html").write_text("<!doctype html><title>강별</title>", encoding="utf-8")
+    _point_at(monkeypatch, _static_app("shared-docs"), tmp_path)
+    r = client.get("/d/gangbyul_draft.html")
+    assert r.status_code == 200
+    assert "강별" in r.text
+
+
+def test_shared_docs_mount_not_shadowed_by_root(client, tmp_path, monkeypatch):
+    # "/" 마운트가 /d/* 를 먼저 먹으면 dist를 뒤져 404가 난다 — 등록 순서 회귀 방지
+    shared, dist = tmp_path / "shared", tmp_path / "dist"
+    shared.mkdir()
+    dist.mkdir()
+    (shared / "note.html").write_text("shared", encoding="utf-8")
+    _point_at(monkeypatch, _static_app("shared-docs"), shared)
+    _point_at(monkeypatch, _static_app(), dist)
+    assert client.get("/d/note.html").text == "shared"

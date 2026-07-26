@@ -25,6 +25,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="atlas", lifespan=lifespan)
 
 DIST_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
+# 팀과 공유하는 정적 문서(세계관 기획안 등). 디스크에서 바로 서빙하므로 편집 후
+# 재빌드 없이 새로고침만 하면 반영된다. docs/ 전체가 아니라 이 디렉터리만 노출한다.
+SHARED_DOCS_DIR = Path(__file__).resolve().parent.parent / "docs" / "public"
 
 # 대화 컨텍스트에 넣는 최근 메시지 수 — Gemma 컨텍스트 한도 보호용
 HISTORY_LIMIT = 30
@@ -432,6 +435,9 @@ async def thread_budget(thread_id: int, doc_ids: str | None = None):
         "exact": exact,
     }
 
+
+# 공유 문서(docs/public) 서빙 — "/" 마운트보다 먼저 등록해야 가려지지 않는다.
+app.mount("/d", StaticFiles(directory=SHARED_DOCS_DIR, html=True, check_dir=False), name="shared-docs")
 
 # 빌드된 프론트(web/dist) 서빙 — dist가 아예 없으면(빌드 전) starlette check_config가 첫 비-API
 # 요청에서 RuntimeError→500 (서버 기동·/api/*는 정상). dist가 있고 경로만 없으면 404.
