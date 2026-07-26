@@ -40,10 +40,9 @@ test('프로젝트 클릭 → onSelectProject', async () => {
   expect(onSelect).toHaveBeenCalledWith(3)
 })
 
-test('새 프로젝트: prompt 입력으로 POST하고 목록을 갱신한다', async () => {
+test('새 프로젝트: 입력창으로 POST하고 목록을 갱신한다', async () => {
   let posted: unknown = null
   let listCalls = 0
-  vi.spyOn(window, 'prompt').mockReturnValue('  새 프로젝트  ')
   server.use(
     healthHandler(false),
     http.get('/api/projects', () => {
@@ -59,15 +58,36 @@ test('새 프로젝트: prompt 입력으로 POST하고 목록을 갱신한다', 
     <Sidebar selectedProjectId={null} selectedThreadId={null} onSelectProject={noop} onSelectThread={noop} />,
   )
   await userEvent.click(screen.getByLabelText('새 프로젝트'))
+  await userEvent.type(screen.getByRole('textbox', { name: '프로젝트 이름' }), '  새 프로젝트  ')
+  await userEvent.click(screen.getByRole('button', { name: '확인' }))
+  await waitFor(() => expect(posted).toEqual({ name: '새 프로젝트' })) // 공백 trim
   expect(await screen.findByText('새 프로젝트')).toBeInTheDocument()
-  expect(posted).toEqual({ name: '새 프로젝트' }) // 공백 trim
+})
+
+test('이름 변경: 기존 이름이 채워지고, 취소하면 PATCH를 보내지 않는다', async () => {
+  let patched = false
+  server.use(
+    healthHandler(false),
+    http.get('/api/projects', () => HttpResponse.json([makeProject({ id: 1, name: '강별' })])),
+    http.patch('/api/projects/1', () => {
+      patched = true
+      return HttpResponse.json(makeProject({ id: 1, name: '강별' }))
+    }),
+  )
+  renderWithClient(
+    <Sidebar selectedProjectId={null} selectedThreadId={null} onSelectProject={noop} onSelectThread={noop} />,
+  )
+  await userEvent.click(await screen.findByLabelText('프로젝트 이름 변경'))
+  expect(screen.getByRole('textbox', { name: '프로젝트 이름' })).toHaveValue('강별')
+  await userEvent.click(screen.getByRole('button', { name: '취소' }))
+  expect(patched).toBe(false)
+  expect(screen.queryByRole('textbox', { name: '프로젝트 이름' })).not.toBeInTheDocument()
 })
 
 test('선택된 프로젝트의 스레드 목록: 클릭 선택·생성·보관 토글', async () => {
   const onSelectThread = vi.fn()
   let patched: unknown = null
   let threadPosted: unknown = null
-  vi.spyOn(window, 'prompt').mockReturnValue('신규 스레드')
   server.use(
     healthHandler(false),
     http.get('/api/projects', () => HttpResponse.json([makeProject({ id: 1 })])),
@@ -94,6 +114,8 @@ test('선택된 프로젝트의 스레드 목록: 클릭 선택·생성·보관 
   expect(onSelectThread).toHaveBeenCalledWith(11)
 
   await userEvent.click(screen.getByLabelText('새 스레드'))
+  await userEvent.type(screen.getByRole('textbox', { name: '스레드 제목' }), '신규 스레드')
+  await userEvent.click(screen.getByRole('button', { name: '확인' }))
   await waitFor(() => expect(threadPosted).toEqual({ title: '신규 스레드' }))
   expect(onSelectThread).toHaveBeenCalledWith(13) // 생성 직후 자동 선택
 

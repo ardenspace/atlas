@@ -143,6 +143,12 @@ textarea.overlay-body { resize: none; color: var(--text); font: inherit; width: 
 .overlay-foot .primary { background: var(--accent); color: #10131a; font-weight: 600; }
 .overlay-foot .primary:disabled { opacity: 0.4; }
 .overlay-foot .danger { background: none; border: 1px solid var(--danger); color: var(--danger); margin-right: auto; }
+.name-prompt { width: min(420px, 92vw); height: auto; }
+.name-prompt h3 { font-size: 0.95rem; font-weight: 600; }
+.name-prompt input {
+  background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px 10px; font: inherit; width: 100%;
+}
 .settle-pick { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 .settle-pick label { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 6px; }
 .settle-pick label:hover { background: var(--line); }

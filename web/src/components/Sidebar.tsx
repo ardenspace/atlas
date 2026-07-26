@@ -1,8 +1,26 @@
+import { useState } from 'react'
 import {
   useCreateProject, useCreateThread, useDeleteProject, useDeleteThread,
   useHealth, useProject, useProjects, useUpdateProject, useUpdateThread,
 } from '../api/hooks'
 import type { Project, ThreadMeta } from '../api/types'
+import { NamePrompt } from './NamePrompt'
+
+type Prompt =
+  | { kind: 'new-project' }
+  | { kind: 'rename-project'; project: Project }
+  | { kind: 'new-thread' }
+  | { kind: 'rename-thread'; thread: ThreadMeta }
+
+function promptLabel(p: Prompt) {
+  return p.kind === 'new-project' || p.kind === 'rename-project' ? '프로젝트 이름' : '스레드 제목'
+}
+
+function promptInitial(p: Prompt) {
+  if (p.kind === 'rename-project') return p.project.name
+  if (p.kind === 'rename-thread') return p.thread.title
+  return ''
+}
 
 interface SidebarProps {
   selectedProjectId: number | null
@@ -23,15 +41,38 @@ export function Sidebar({
   const createThread = useCreateThread()
   const updateThread = useUpdateThread()
   const deleteThread = useDeleteThread()
+  const [prompt, setPrompt] = useState<Prompt | null>(null)
 
-  function addProject() {
-    const name = window.prompt('프로젝트 이름')?.trim()
-    if (name) createProject.mutate({ name })
-  }
-
-  function renameProject(p: Project) {
-    const name = window.prompt('프로젝트 이름', p.name)?.trim()
-    if (name && name !== p.name) updateProject.mutate({ id: p.id, patch: { name } })
+  function submitPrompt(value: string) {
+    if (prompt === null) return
+    setPrompt(null)
+    switch (prompt.kind) {
+      case 'new-project':
+        createProject.mutate({ name: value })
+        break
+      case 'rename-project':
+        if (value !== prompt.project.name) {
+          updateProject.mutate({ id: prompt.project.id, patch: { name: value } })
+        }
+        break
+      case 'new-thread':
+        if (selectedProjectId === null) return
+        createThread.mutate(
+          { projectId: selectedProjectId, title: value },
+          { onSuccess: (t) => onSelectThread(t.id) },
+        )
+        break
+      case 'rename-thread':
+        if (selectedProjectId === null) return
+        if (value !== prompt.thread.title) {
+          updateThread.mutate({
+            id: prompt.thread.id,
+            projectId: selectedProjectId,
+            patch: { title: value },
+          })
+        }
+        break
+    }
   }
 
   function removeProject(p: Project) {
@@ -41,24 +82,6 @@ export function Sidebar({
         if (selectedProjectId === p.id) onSelectProject(null)
       },
     })
-  }
-
-  function addThread() {
-    if (selectedProjectId === null) return
-    const title = window.prompt('스레드 제목')?.trim()
-    if (!title) return
-    createThread.mutate(
-      { projectId: selectedProjectId, title },
-      { onSuccess: (t) => onSelectThread(t.id) },
-    )
-  }
-
-  function renameThread(t: ThreadMeta) {
-    if (selectedProjectId === null) return
-    const title = window.prompt('스레드 제목', t.title)?.trim()
-    if (title && title !== t.title) {
-      updateThread.mutate({ id: t.id, projectId: selectedProjectId, patch: { title } })
-    }
   }
 
   function removeThread(t: ThreadMeta) {
@@ -91,14 +114,19 @@ export function Sidebar({
       <section>
         <div className="section-head">
           <h2>프로젝트</h2>
-          <button aria-label="새 프로젝트" onClick={addProject}>+</button>
+          <button aria-label="새 프로젝트" onClick={() => setPrompt({ kind: 'new-project' })}>+</button>
         </div>
         <ul>
           {(projects.data ?? []).map((p) => (
             <li key={p.id} className={p.id === selectedProjectId ? 'active' : ''}>
               <button className="row-main" onClick={() => onSelectProject(p.id)}>{p.name}</button>
               <span className="row-actions">
-                <button aria-label="프로젝트 이름 변경" onClick={() => renameProject(p)}>✎</button>
+                <button
+                  aria-label="프로젝트 이름 변경"
+                  onClick={() => setPrompt({ kind: 'rename-project', project: p })}
+                >
+                  ✎
+                </button>
                 <button aria-label="프로젝트 삭제" onClick={() => removeProject(p)}>✕</button>
               </span>
             </li>
@@ -110,7 +138,7 @@ export function Sidebar({
         <section>
           <div className="section-head">
             <h2>스레드</h2>
-            <button aria-label="새 스레드" onClick={addThread}>+</button>
+            <button aria-label="새 스레드" onClick={() => setPrompt({ kind: 'new-thread' })}>+</button>
           </div>
           <ul>
             {threads.map((t) => (
@@ -122,7 +150,12 @@ export function Sidebar({
               >
                 <button className="row-main" onClick={() => onSelectThread(t.id)}>{t.title}</button>
                 <span className="row-actions">
-                  <button aria-label="스레드 이름 변경" onClick={() => renameThread(t)}>✎</button>
+                  <button
+                    aria-label="스레드 이름 변경"
+                    onClick={() => setPrompt({ kind: 'rename-thread', thread: t })}
+                  >
+                    ✎
+                  </button>
                   <button
                     aria-label={t.archived ? '보관 해제' : '스레드 보관'}
                     onClick={() =>
@@ -142,6 +175,14 @@ export function Sidebar({
             {threads.length === 0 && <li className="dim">스레드 없음</li>}
           </ul>
         </section>
+      )}
+      {prompt !== null && (
+        <NamePrompt
+          label={promptLabel(prompt)}
+          initial={promptInitial(prompt)}
+          onSubmit={submitPrompt}
+          onCancel={() => setPrompt(null)}
+        />
       )}
     </aside>
   )
