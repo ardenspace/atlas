@@ -3,3 +3,6 @@ data/
 __pycache__/
 *.pyc
 .DS_Store
+
+# 팀 공유용 문서 — 리포가 public이라 커밋하지 않는다 (서버는 디스크에서 직접 읽음)
+docs/public/
